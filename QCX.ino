@@ -19,6 +19,8 @@
 
 #include "SPI.h"
 #include "ILI9341_t3.h"
+#include <XPT2046_Touchscreen.h>
+
 
          //  4bpp pallett  0-3, 4-7, 8-11, 12-15
 const uint16_t EGA[] = { 
@@ -38,6 +40,7 @@ const uint16_t WF[] = {
 
 
 // alternate display connections for use with audio board
+#define CS_PIN  8       // touchscreen
 #define TFT_DC      20
 #define TFT_CS      21
 #define TFT_RST    255  // 255 = unused, connect to 3.3V
@@ -45,6 +48,8 @@ const uint16_t WF[] = {
 #define TFT_SCLK    14
 #define TFT_MISO    12
 ILI9341_t3 tft = ILI9341_t3(TFT_CS, TFT_DC, TFT_RST, TFT_MOSI, TFT_SCLK, TFT_MISO);
+XPT2046_Touchscreen ts(CS_PIN);
+
 
 #define cat Serial1
 
@@ -67,34 +72,67 @@ uint8_t  vfo_mode = VFO_UNUSED;    // set to invalid value so prints status line
 uint32_t cmd_tm;           // command interval timer
 uint8_t qu_flags;
 
+// cw decode
+#define DECODE_LINES 5
+#define D_LEFT  8               // margins
+#define D_BOTTOM 238            // 
+#define D_SIZE   20             // line spacing
+char dtext[DECODE_LINES][26];   // buffer
+int dline = DECODE_LINES - 1;   // current working line
+int dpos;                       // current cursor position
+
+// screen owners
+#define DECODE 0
+#define KEYBOARD 1
+uint8_t  screen_owner = DECODE;
+
+char kb[5][10] = { \
+   { '1','2','3','4','5','6','7','8','9','0' }, \
+   { 'Q','W','E','R','T','Y','U','I','O','P' }, \
+   { 'A','S','D','F','G','H','J','K','L', 8 }, \
+   { 'Z','X','C','V','B','N','M',',','.','/' }, \
+   { '*','*',' ',' ','?','=',' ',' ',' ',' ' }  \
+};
+/********************************************************************************/
 void setup() {
-int r,g,b;
+int i,j,r,g,b;
 
   Serial.begin(38400);     // for debug or PC control
   cat.begin(38400);        // qcx CAT control
 
   // build the gray scale pallett
-  for( int i = 0; i < 16; ++i ){
+  for( i = 0; i < 16; ++i ){
     r = 2*i + 1;   g = 4*i + 3;  b = 2*i + 1;
     GRAY[i] = r << 11 | g << 5 | b;
   }
+
+  // clear the decode text buffer with spaces
+  for( i = 0; i < DECODE_LINES; ++i ){
+     for( j = 0; j < 25; ++j ) dtext[i][j] = ' ';
+     dtext[i][25] = 0;                               // terminate as a string
+  }
+  
   tft.begin();
   tft.fillScreen(ILI9341_BLACK);
   tft.setRotation(1);
+
+  ts.begin();
+  ts.setRotation(1);
   
 }
 
 
 void loop() {
 static int c_state;
-
+int32_t t;
 
    // poll radio once a second, process qu_flags as a priority
    if( ( millis() - cmd_tm > 1000 ) ){
       if( qu_flags & QUIF ) cat.print("IF;");
       else if( qu_flags & QUFB ) cat.print("FB;");
       else if( qu_flags & QUFA ) cat.print("FA;");
-      else if( qu_flags & QUTB ) cat.print("TB;");
+      else if( qu_flags & QUTB && screen_owner == DECODE ) cat.print("TB;");
+      else if( qu_flags & QUTB ) cat.print("TB0;");
       else{
           switch(c_state){                         // poll radio round robin for missed packet recovery
               case 0: case 2: case 4: case 6: case 8:
@@ -102,8 +140,11 @@ static int c_state;
               case 1: cat.print("FA;");   break;
               case 3: cat.print("QU1;");  break;   // enable flags
               case 5: cat.print("FB;");   break;
-              case 7: cat.print("TB1;");  break;   // enable decode flag
-              case 9: cat.print("TB;");   break;   // !!! redundant ? does TB1 also return decoded text        
+              case 7: if( screen_owner == DECODE ) cat.print("TB1;");
+                      else cat.print("TB0;");  
+                      break;   // enable/disable decode flag
+              case 9: if( screen_owner == DECODE ) cat.print("TB;");
+                      break;        
          }
          ++c_state;
          c_state &= 15;
@@ -113,7 +154,94 @@ static int c_state;
 
    if( cat.available() ) radio_control();
 
+   t = touch();
+   if( t ){
+      // dispatch to who owns the touch screen
+      tft.setTextSize(2);  // !!! all debug code here
+      tft.setTextColor(ILI9341_YELLOW,ILI9341_NAVY);
+      tft.setCursor(0,45);
+      tft.println("          ");
+      tft.println("          ");
+      tft.setCursor(0,45);
+      tft.println(t >> 8);   // x
+      tft.println(t & 0xff);  // y
 
+      // test keyboard
+      key_tx(t);
+   }
+
+
+}
+
+
+void key_tx( int32_t t ){
+int x,y;
+char c;
+
+   if( screen_owner != KEYBOARD ){     // need to display the keyboard
+      screen_owner = KEYBOARD;
+      // !!! use some upper bits(change type) in qu_flags to que a TB0;
+      tft.fillRect(0, 80, 320, 160, EGA[0]);
+      tft.setTextSize(2);
+      tft.setTextColor( ILI9341_YELLOW, ILI9341_MAROON );
+      for( y = 0;  y < 5; ++y ){
+         for( x = 0; x < 10; ++x ){
+             tft.fillRect(  32*x +3, 32*y +3 +80, 32-6, 32-6, ILI9341_MAROON );
+             tft.setCursor( 32*x +6, 32*y +6 +80);
+             if( kb[y][x] == 8 ) tft.print("BS");
+             else tft.write(kb[y][x]);
+         }
+      }
+      // fixups for rx and space
+      tft.fillRect( 0, 80 + 3 + 4*32, 32+32 - 6, 32-6, ILI9341_MAROON );
+      tft.setCursor( 6, 80 + 6 + 4*32 );
+      tft.print("RX");
+      tft.fillRect( 6*32+3, 80 + 4*32+3, 4*32 -6, 32-6 , ILI9341_MAROON);
+      tft.setCursor( 6*32 + 6, 80 + 4*32 + 6 );
+      tft.print("SPACE");
+   }
+
+   x = t >> 8;   y = t & 0xff;
+   tft.setCursor(80-12,80-12);
+   y -= 80;
+   x /= 32;   y /= 32;
+
+   c = kb[y][x];
+   if( x >= 0 && x < 10 && y >= 0 && y < 5 )  tft.write( c );
+
+   if( c == '*' ){
+     tft.fillRect(0, 80, 320, 160, EGA[0]);
+     screen_owner = DECODE;
+     cat.print("TB1;");
+   }
+}
+
+int32_t touch(){
+static uint32_t  tm;
+static int16_t  x,y;
+static uint8_t   z;
+
+   // control rate of updates,  library is at 3 ms.
+   if( millis() - tm < 5 ) return 0;
+   tm = millis();
+
+   if( ts.touched() ){
+     ++z;
+     TS_Point p = ts.getPoint();
+     //ts.readData(&x,&y,&z);
+     x += map( p.x, 250, 3650, 0, 320 );
+     y += map( p.y, 330, 3700, 0, 240 );
+     //x = p.x;  y = p.y;
+   }
+   else z = 0;
+   if( z == 0 ) x = y = 0;
+
+   if( z == 4 ){
+     x >>= 2;
+     y >>= 2;
+     return ( x << 8 ) | y;
+   }
+   return 0;
 }
 
 void vfo_mode_disp(){
@@ -140,13 +268,15 @@ int pos;
    tft.setTextColor(EGA[4+r],0);
    tft.print("RIT"); 
    tft.drawLine(0,40,640,40,EGA[4]);
-    
+   tft.drawLine(0,41,640,41,EGA[4]);
+   
        //  underline active tuning digit with best guess at step
    s = stp;    
    if( r ) pos = 278, s = rit_stp;    // rit active
    else if( b ) pos = 183;            // vfo b
    else pos = 53;                     // vfo a
    tft.drawLine(pos+s,40,pos+s+10,40,EGA[14]); 
+   tft.drawLine(pos+s,41,pos+s+10,41,EGA[14]); 
 }
 
 void vfo_freq_disp(){
@@ -229,14 +359,55 @@ char c;
 }
 
 void cat_decode(){
+int i;
+char c;
 
   qu_flags &= ~QUTB;
+  if( strlen(response) < 6 ) return;                       // no data
+  if( screen_owner != DECODE ) return;
+
+  i = 5;
+  tft.setTextColor(EGA[14],0);
+  tft.setTextSize(2);
+  while( (c = response[i++]) ){
+     if( dpos >= 25 ) scroll_dtext();                      // scroll needed
+     // save each char in buffer and print to the screen
+     dtext[dline][dpos] = c;
+     tft.setCursor( D_LEFT + 12*dpos, D_BOTTOM - D_SIZE );
+     tft.write(c);
+     ++dpos;
+  }
+}
+
+
+void scroll_dtext(){
+int i,j,k;
+
+      dtext[dline][25] = 0;                                // terminate string redundantly
+      dpos = 0;
+      if( ++dline >= DECODE_LINES ) dline = 0;             // move index instead of data
+      for( i = 0; i < 25; ++i ) dtext[dline][i] = ' ';     // clear line
+      dtext[dline][25] = 0;
+
+      // write all the buffer to the screen
+      j = dline + 1;                                       // first line printed is one more than new dline
+      if( j >= DECODE_LINES ) j = 0;
+      k = D_BOTTOM - D_SIZE * DECODE_LINES;                // screen position of the 1st write
+      tft.setTextColor(EGA[14],0);
+
+      for( i = 0; i < DECODE_LINES; ++i ){                 // print to the screen
+         tft.setCursor(D_LEFT,k);
+         tft.print(&dtext[j][0]);
+         k += D_SIZE;
+         if( ++j >= DECODE_LINES ) j = 0;
+      }
+  
 }
 
 void cat_qu_flags(){                       // process the qu flags response
 
   qu_flags |= atoi(&response[2]);             // merge new flags
-  qu_flags &= (QUFA + QUFB + QUIF + QUTB);   // clear unused flags
+  qu_flags &= (QUFA + QUFB + QUIF + QUTB);    // clear unused flags
 }
 
 void cat_freq( int32_t *vfo ){             // update a vfo from cat response
@@ -296,215 +467,6 @@ int32_t temp2;
    qu_flags &= ~QUIF;
 }
 
-#ifdef NOWAY
-// REBEL emulation code as radio rather than as contolling computer
-/************************************************************************/
-
-      //  K3 emulation code
-            
-void get_freq(unsigned long vfo ){   /* report vfo */
-
-    if( mode == CW && fun_selected[0] != WIDE ) vfo = vfo + (( sideband == USB ) ? mode_offset : - mode_offset);     
-    stage_str("000");
-    if( vfo < 10000000 ) stage('0');
-    stage_num(vfo);  
-}
-
-void radio_control() {
-
-static String command = "";
-String lcommand;
-char c;
-int rit;
-int sm;
-int bat;  /* put battery voltage in front panel revision */
-
-    if (Serial.available() == 0) return;
-    
-    while( Serial.available() ){
-       c = Serial.read();
-       command += c;
-       if( c == ';' ) break;
-    }
-    
-    if( c != ';' ) return;  /* command not complete yet */
-  
-    lcommand = command.substring(0,2);
- 
-    if( command.substring(2,3) == ";" || command.substring(2,4) == "$;" || command.substring(0,2) == "RV" ){      /* it is a get command */
-      stage_str(lcommand);  /* echo the command */
-      if( command.substring(2,3) == "$") stage('$');
-      
-      if (lcommand == "IF") {
-/*
-RSP format: IF[f]*****+yyyyrx*00tmvspbd1*; where the fields are defined as follows:
-[f] Operating frequency, excluding any RIT/XIT offset (11 digits; see FA command format)
-* represents a space (BLANK, or ASCII 0x20)
-+ either "+" or "-" (sign of RIT/XIT offset)
-yyyy RIT/XIT offset in Hz (range is -9999 to +9999 Hz when computer-controlled)
-r 1 if RIT is on, 0 if off
-x 1 if XIT is on, 0 if off
-t 1 if the K3 is in transmit mode, 0 if receive
-m operating mode (see MD command)
-v receive-mode VFO selection, 0 for VFO A, 1 for VFO B
-s 1 if scan is in progress, 0 otherwise
-p 1 if the transceiver is in split mode, 0 otherwise
-b Basic RSP format: always 0; K2 Extended RSP format (K22): 1 if present IF response
-is due to a band change; 0 otherwise
-d Basic RSP format: always 0; K3 Extended RSP format (K31): DATA sub-mode,
-if applicable (0=DATA A, 1=AFSK A, 2= FSK D, 3=PSK D)
-*/      
-        get_freq(tx_vfo);
-        stage_str("     ");
-        rit= rit_offset;
-        if( rit >= 0 ) stage_str("+0");
-        else{
-          stage_str("-0"); 
-          rit = - rit;
-        }
-        if( rit < 100 ) stage('0');
-        if( rit < 10 ) stage('0');    //IF[f]*****+yyyyrx*00tmvspbd1*;
-        stage_num(rit);
-        stage_str("10 0003");    /* rit,xit,xmit,cw mode */
-        if( split == 2 ) stage_str("10");
-        else stage_str("00");
-        if( split ) stage('1');
-        else stage('0');
-        stage_str("001 ");      
-      }
-      else if(lcommand == "FA") get_freq( rx_vfo );
-      else if(lcommand == "FB") get_freq( tx_vfo );
-      else if(lcommand == "RT") stage('1');
-      else if(lcommand == "FR") stage('0');
-      else if(lcommand == "FT"){
-         if( split ) stage('1');
-         else stage('0');
-      }
-      else if( lcommand == "KS"){
-        stage('0');
-        stage_num(wpm);
-      }
-      else if(lcommand == "XF") stage_num(fun_selected[0]);
-      else if(lcommand == "AG") stage_str("030");
-      else if(lcommand == "RG") stage_str("250");
-      else if(lcommand == "PC") stage_str("005");
-      else if(lcommand == "FW") stage_str("0000") , stage_num(fun_selected[0]);
-      else if(lcommand == "IS") stage_str("0000");
-      else if(lcommand == "AN") stage('1');
-      else if(lcommand == "GT") stage_str("004");
-      else if(lcommand == "TQ") stage_num(transmitting);
-      else if(lcommand == "PA" || lcommand == "XT" || lcommand == "NB" ) stage('0');
-      else if(lcommand == "RA") stage_str("00");
-      else if(lcommand == "OM") stage_str("-----F------");
-      else if(lcommand == "LK") stage_num(user[LOCK]);
-      else if(lcommand == "MD") stage('3');
-      else if(lcommand == "RV" && command.substring(2,3) == "F"){  /* battery voltage in the revision field */
-        stage(command.charAt(2));
-        bat = battery(0);
-        stage_num(bat/10);
-        stage('.');
-        stage_num(bat % 10);
-        stage('0');
-      }
-      else if(lcommand == "RV" && command.substring(2,3) == "A"){  /* swap status in revision field */
-        stage(command.charAt(2));
-        if( split == 2 ) stage_str("SWAP ");
-        else stage_str("    ");
-      }
-      else if(lcommand == "RV"){   // revisions
-        stage(command.charAt(2));
-        stage_str("     ");
-      }
-      else if(lcommand == "SM"){
-        stage_str("00");
-        sm = smeter(0);
-        if( sm < 10 ) stage('0');
-        stage_num(sm);
-      }   
-      else{
-         stage('0');  /* don't know what it is */
-      }
- 
-    stage(';');   /* response terminator */
-    }
-    
-    else  set_k3(lcommand,command);    /* else it is a set command ? */
-   
-    command = "";   /* clear for next command */
-}
-
-
-void set_k3(String lcom, String com ){
-String arg;
-long val;
-char buf[25];
-
- 
-    if( lcom == "FA" || lcom == "FB" ){    /* set vfo freq */
-      arg = com.substring(2,13);
-      arg.toCharArray(buf,25);
-      val = atol(buf);
-      if( mode == CW && fun_selected[0] != WIDE ) val = val - (( sideband == USB ) ? mode_offset : - mode_offset);     
-      cat_band_change((unsigned long)val);
-      if( lcom == "FB" || split == 0 ) tx_vfo = val;
-      if( lcom == "FA" ) rx_vfo = val;
-      update_frequency(DISPLAY_UPDATE);  /* listen on new freq */
-    }
-    else if( lcom == "KS" ){    /* keyer speed */
-      arg= com.substring(2,5);
-      arg.toCharArray(buf,25);
-      val = atol(buf);
-      wpm = val;
-    }
-    else if( lcom == "LK" ){     /* lock vfo's */
-      val = com.charAt(2);
-      if( val == '$' ) val = com.charAt(3);
-      user[LOCK] = val - '0';
-    }
-    else if( lcom == "FW" ){     /* xtal filter select */
-      val = com.charAt(6) - '0';
-      if( val < 4 && val != 0 ){
-        fun_selected[0] = val;
-        set_band_width(val);
-      }
-    }
-    else if( lcom == "FT" ){     /* enter split */
-      val = com.charAt(2) - '0';
-      if( val == 0 ){
-        if( split == 2 ) rx_vfo = tx_vfo;
-        else tx_vfo = rx_vfo;        
-      }
-      split = user[SPLIT] = val;
-      user[SWAPVFO] = 0;        
-    }
-    else if( lcom == "FR" ){    /* cancel split ? */
-      val = com.charAt(2);
-      if( val == '0' ){
-        if( split == 2 ) rx_vfo = tx_vfo;
-        else tx_vfo = rx_vfo;
-        split = user[SPLIT] = user[SWAPVFO] = 0;
-      }
-    }
-    else if( com == "SWT11;" ){    /* A/B tap. swap (listen) vfo */
-      if( split < 2 ){            /* turns on split if off */
-        split = 2;
-        user[SPLIT]= user[SWAPVFO] = 1;
-      }
-      else{                        /* back to listen on RX freq, stay in split */
-       split = 1;
-       user[SWAPVFO] = 0;
-      }
-      update_frequency(DISPLAY_UPDATE);  /* listen on selected vfo */
-    } 
-            
-    write_sleds(sleds[fun_selected[function]]);
-    write_fleds(fleds[function], 1);  /* update on/off status  on FGRN led */
-    led_on_timer = 1000;            /* works different now with battery saver mode */
-    
-}
-        /* end of K3 emulation functions */
-
-#endif
 
 /******************************************************************/
 
