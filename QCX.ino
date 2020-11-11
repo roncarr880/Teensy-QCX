@@ -22,6 +22,51 @@
 #include <XPT2046_Touchscreen.h>
 
 
+// AudioSDR Library
+/**** first example
+#include <Audio.h>
+#include "AudioSDR.h"
+//
+AudioInputI2S input;
+AudioOutputI2S output;
+AudioSDR mySDR;
+AudioControlSGTL5000 codec;
+//
+AudioConnection c1(input, 0, mySDR, 0);
+AudioConnection c2(input 1, mySDR, 1);
+AudioConnection c1(mySDR, 0, output, 0);
+AudioConnection c1(mySDR, 0, output, 1);
+// ***/
+
+// AudioSDR 2nd example
+// Required "includes"
+#include <Arduino.h>
+#include <Audio.h>
+#include "arm_math.h"
+#include "arm_const_structs.h"
+#include "AudioSDRlib.h"
+
+// --- Audio Block elements
+AudioInputI2S IQinput;
+AudioSDRpreProcessor preProcessor; // For I2S error detection and compensation
+AudioGrabberComplex256 spectrumData; // For extraction of data for spectrum display
+AudioSDR SDR;
+AudioOutputI2S audioOut;
+AudioControlSGTL5000 codec;
+//---
+// Audio Block connections
+AudioConnection c1(IQinput,0, preProcessor,0);
+AudioConnection c2(IQinput,1, preProcessor,1);
+AudioConnection c3(preProcessor,0, spectrumData,0);
+AudioConnection c4(preProcessor,1, spectrumData,1);
+AudioConnection c5(preProcessor,0, SDR,0);
+AudioConnection c6(preProcessor,1, SDR,1);
+AudioConnection c7(SDR,0, audioOut,0);
+AudioConnection c8(SDR,0, audioOut,1);    // or SDR,1
+//
+int32_t tuningOffset;     // function returns float, cast to int32 for this radio.
+
+
          //  4bpp pallett  0-3, 4-7, 8-11, 12-15
 const uint16_t EGA[] = { 
          ILI9341_BLACK,    ILI9341_NAVY,    ILI9341_DARKGREEN, ILI9341_DARKCYAN,  \
@@ -115,10 +160,57 @@ int i,j,r,g,b;
   tft.begin();
   tft.fillScreen(ILI9341_BLACK);
   tft.setRotation(1);
-
-  ts.begin();
-  ts.setRotation(1);
   
+  ts.begin();                        // touchscreen
+  ts.setRotation(1);
+ 
+  // Audio SDR
+//  AudioMemory(20);
+//  AudioNoInterrupts();
+//  codec.inputSelect(AUDIO_INPUT_LINEIN);
+//  codec.volume(0.7);
+//  codec.lineInLevel(15);  // Set codec input voltage level to most sensitive
+//  codec.lineOutLevel(13); // Set codec output voltage level to most sensitive
+ // codec.enable();
+ // AudioInterrupts();
+ // delay(500);
+  //
+  // tuningOffset = (int32_t)SDR.setDemodMode(LSBmode); // Select LSB mode and return its tuning offset
+  // frequency = 7150000.0; // Start listening at 7.15 MHz
+  // displayFrequency(frequency); // Update the front panel display
+  // tuner.setFrequency(frequency-tuningOffset); // Set rf quadrature oscillator freq.
+  //
+  preProcessor.startAutoI2SerrorDetection(); // Start I2S error detection
+  preProcessor.swapIQ(false);
+
+  SDR.setInputGain(2.0);
+  SDR.setOutputGain(5.0);
+  SDR.setAudioFilter(audio2900);        // Overide the default 2700 Hz LSB audio filter
+  
+     // sounds like no BFO with some of these settings
+     // noiseBlanker threshold too low or not disabled
+  SDR.setNoiseBlankerThresholdDb(10.0);  // Set threshold to 5dB above average level. 5 too low
+  //SDR.enableNoiseBlanker(); 
+  SDR.disableNoiseBlanker();
+  SDR.disableALSfilter();
+  SDR.enableAGC();
+  SDR.setAGCmode(AGCmedium);
+  //
+
+  // --- Set up the Audio board
+  AudioMemory(40);    //20
+  AudioNoInterrupts();
+  codec.enable();
+  codec.inputSelect(AUDIO_INPUT_LINEIN);
+  codec.volume(0.5);
+  codec.lineInLevel(15);  // Set codec input voltage level to most sensitive
+  codec.lineOutLevel(13); // Set codec output voltage level to most sensitive
+  AudioInterrupts();
+  delay(200);
+  //
+  tuningOffset = (int32_t)SDR.setDemodMode(LSBmode); // Select LSB mode and return its tuning offset
+  SDR.setMute(false);
+
 }
 
 
@@ -180,7 +272,6 @@ char c;
 
    if( screen_owner != KEYBOARD ){     // need to display the keyboard
       screen_owner = KEYBOARD;
-      // !!! use some upper bits(change type) in qu_flags to que a TB0;
       tft.fillRect(0, 80, 320, 160, EGA[0]);
       tft.setTextSize(2);
       tft.setTextColor( ILI9341_YELLOW, ILI9341_MAROON );
@@ -256,39 +347,63 @@ int pos;
    
    tft.setTextSize(1);
    tft.setTextColor(EGA[4+a],0);
-   tft.setCursor(45,2);
+   tft.setCursor(15,2);
    tft.print("VFO A");
-   tft.setCursor(110,2);
-   tft.setTextColor(EGA[4+s],0);
-   tft.print("Split");
-   tft.setCursor(170,2);
+   
+   tft.setCursor(60,2);
    tft.setTextColor(EGA[4+b],0);
    tft.print("VFO B");
+   
+   tft.setCursor(105,2);
+   tft.setTextColor(EGA[4+s],0);
+   tft.print("Split");
+
+   tft.setCursor(150,2);
+   tft.print("CW");
+
+   tft.setCursor(175,2);
+   tft.print("USB");
+
+   tft.setCursor(205,2);
+   tft.print("LSB");
+
+   tft.setCursor(235,2);
+   tft.print("AM");
+   
    tft.setCursor(280,2);
    tft.setTextColor(EGA[4+r],0);
-   tft.print("RIT"); 
-   tft.drawLine(0,40,640,40,EGA[4]);
-   tft.drawLine(0,41,640,41,EGA[4]);
+   tft.print("RIT");
+    
+   tft.drawLine(0,60,640,60,EGA[4]);
+   tft.drawLine(0,61,640,61,EGA[4]);
    
        //  underline active tuning digit with best guess at step
+    /*   
    s = stp;    
    if( r ) pos = 278, s = rit_stp;    // rit active
    else if( b ) pos = 183;            // vfo b
    else pos = 53;                     // vfo a
    tft.drawLine(pos+s,40,pos+s+10,40,EGA[14]); 
-   tft.drawLine(pos+s,41,pos+s+10,41,EGA[14]); 
+   tft.drawLine(pos+s,41,pos+s+10,41,EGA[14]);
+   */ 
 }
 
 void vfo_freq_disp(){
 int val;
+int32_t VFO;
 
+   VFO = vfo_a + tuningOffset - 700;
+
+   vfo_freq_disp_alt(); // !!! testing
+   return;
+   
    tft.setTextSize(2);
    tft.setCursor(5,20);
    tft.setTextColor(EGA[10],0);
-   if( vfo_a < 10000000 ) tft.write(' ');
-   tft.print(vfo_a / 1000);
+   if( VFO < 10000000 ) tft.write(' ');
+   tft.print(VFO / 1000);
    tft.write('.');
-   p_leading(vfo_a % 1000,3);
+   p_leading(VFO % 1000,3);
    
    tft.setCursor(135,20);
    if( vfo_b < 10000000 ) tft.write(' ');
@@ -316,6 +431,164 @@ int test;
        test /= 10;
    }
    tft.print(val);
+  
+}
+
+
+//  alternate freq display.  Simulate something that looks like the Argonaut V
+/* segments */
+#define A_  1
+#define B_  2
+#define C_  4
+#define D_  8
+#define E_  16
+#define F_  32
+#define G_  64
+#define DP_ 128
+uint8_t segment[16] = {0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f,0x77,0x7c,0x58,0x5e,0x79,0x71};
+
+void vfo_freq_disp_alt(){
+int32_t vfo;
+int32_t digit;
+int i,mult;
+
+   if( vfo_mode & VFO_B ) vfo = vfo_b;
+   else vfo = vfo_a;
+
+   // 40 meter radio, ignore 10 meg digit for now
+   mult = 1000000;
+   for( i = 0; i < 7; ++i ){
+       digit = vfo / mult;
+       disp_segments(i,digit);
+       vfo -= digit*mult;
+       mult /= 10;
+   }  
+
+   tft.setTextSize(2);
+   tft.setTextColor(EGA[10],0);
+   int val = rit;
+   if( val < 0 ){
+      val = - val;
+      tft.setTextColor(EGA[12],0);       // change color instead of displaying the minus sign
+   }
+   tft.setCursor(265,20);
+   p_leading(val,4);
+}
+
+void disp_segments( int pos, int32_t digit ){    // ?? maybe a font table would be better
+uint16_t color;
+
+   digit = segment[digit];
+   color = ( digit & A_ ) ? EGA[10] : GRAY[1] ;
+   draw_A( pos,color );
+   color = ( digit & B_ ) ? EGA[10] : GRAY[1] ;
+   draw_B( pos,color );
+   color = ( digit & C_ ) ? EGA[10] : GRAY[1] ;
+   draw_C( pos,color );
+   color = ( digit & D_ ) ? EGA[10] : GRAY[1] ;
+   draw_D( pos,color );
+   color = ( digit & E_ ) ? EGA[10] : GRAY[1] ;
+   draw_E( pos,color );
+   color = ( digit & F_ ) ? EGA[10] : GRAY[1] ;
+   draw_F( pos,color );
+   color = ( digit & G_ ) ? EGA[10] : GRAY[1] ;
+   draw_G( pos,color );
+   color = ( pos == 0 || pos == 3 ) ? EGA[10] : GRAY[1] ;
+   draw_DP( pos, color);
+  
+}
+
+#define VB 20     //20
+#define VS 35     //40
+#define HB 20     //20
+#define HS 32     //30
+ 
+void draw_A( int pos, uint16_t color ){
+int zz;
+
+   zz = HB + HS * pos;
+   tft.drawLine(zz+12, VB,   zz+25, VB, color);
+   tft.drawLine(zz+12, VB+1, zz+25, VB+1, color);
+   tft.drawLine(zz+12, VB+2, zz+25, VB+2, color);
+   tft.drawLine(zz+12, VB+3, zz+25, VB+3, color);
+  
+}
+
+void draw_DP( int pos, uint16_t color ){
+int zz;
+
+   zz = HB + HS * pos;
+   tft.drawLine(zz+HS-5, VB+VS-1,zz+HS-2, VB+VS-1, color);
+   tft.drawLine(zz+HS-5, VB+VS-2, zz+HS-2, VB+VS-2, color);
+   tft.drawLine(zz+HS-5, VB+VS-3, zz+HS-2, VB+VS-3, color);
+  
+}
+
+
+void draw_B( int pos, uint16_t color ){
+int zz;
+
+   zz = HB + HS * pos +27;
+   tft.drawLine(zz, VB, zz-3, VB+VS/2-3, color);
+   tft.drawLine(zz+1, VB+1, zz-2, VB+VS/2-2, color);
+   tft.drawLine(zz+2, VB+2, zz-1, VB+VS/2-1, color);
+   tft.drawLine(zz+3, VB+3, zz, VB+VS/2, color);
+  
+}
+
+void draw_F( int pos, uint16_t color ){
+int zz;
+
+   zz = HB + HS * pos;
+   tft.drawLine(zz+10, VB, zz+8, VB+VS/2-4, color);
+   tft.drawLine(zz+9, VB+1, zz+7, VB+VS/2-3, color);
+   tft.drawLine(zz+8, VB+2, zz+6, VB+VS/2-2, color);
+   tft.drawLine(zz+7, VB+3, zz+5, VB+VS/2-1, color);
+  
+}
+
+
+void draw_C( int pos, uint16_t color ){
+int zz;
+  
+   zz = HB + HS * pos + 24;
+   tft.drawLine(zz, VB+VS/2+3, zz-3, VB+VS-1, color);
+   tft.drawLine(zz+1, VB+VS/2+2, zz-2, VB+VS-2, color);
+   tft.drawLine(zz+2, VB+VS/2+1, zz-1, VB+VS-3, color);
+   tft.drawLine(zz+3, VB+VS/2, zz, VB+VS-4, color);
+  
+}
+
+void draw_E( int pos, uint16_t color ){
+int zz;
+  
+   zz = HB + HS * pos;
+   tft.drawLine(zz+7, VB+VS/2+3, zz+4, VB+VS, color);
+   tft.drawLine(zz+6, VB+VS/2+2, zz+3, VB+VS-1, color);
+   tft.drawLine(zz+5, VB+VS/2+1, zz+2, VB+VS-2, color);
+   tft.drawLine(zz+4, VB+VS/2, zz+1, VB+VS-3, color);
+  
+}
+
+
+void draw_D( int pos, uint16_t color ){
+int zz;
+  
+   zz = HB + HS * pos;
+   tft.drawLine(zz+6, VB+VS, zz+20, VB+VS, color);
+   tft.drawLine(zz+6, VB+VS-1, zz+20, VB+VS-1, color);
+   tft.drawLine(zz+6, VB+VS-2, zz+20, VB+VS-2, color);
+   tft.drawLine(zz+6, VB+VS-3, zz+20, VB+VS-3, color);
+  
+}
+void draw_G( int pos, uint16_t color ){
+int zz;
+  
+   zz = HB + HS * pos;
+   tft.drawLine(zz+10, VB+VS/2+1, zz+21, VB+VS/2+1, color);
+   tft.drawLine(zz+9, VB+VS/2,  zz+22, VB+VS/2, color);
+   tft.drawLine(zz+9, VB+VS/2-1, zz+22, VB+VS/2-1, color);
+   tft.drawLine(zz+10, VB+VS/2-2, zz+21, VB+VS/2-2, color);
   
 }
 
@@ -448,6 +721,7 @@ int32_t temp2;
    if( temp != vfo_mode ){                    // compare to displayed value, avoid duplicate screen update
       vfo_mode = temp;
       vfo_mode_disp();
+      vfo_freq_disp();
    }
 
    response[23] = 0;           // get the rit value
