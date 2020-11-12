@@ -1,5 +1,6 @@
 /*
  *   QCX with Teensy 3.6, Audio shield, and ILI9341 touchscreen added on QCX Dev Board.
+ *   AudioSDR library.
  * 
 
    Free pins when using audio board and display.
@@ -21,25 +22,7 @@
 #include "ILI9341_t3.h"
 #include <XPT2046_Touchscreen.h>
 
-
 // AudioSDR Library
-/**** first example
-#include <Audio.h>
-#include "AudioSDR.h"
-//
-AudioInputI2S input;
-AudioOutputI2S output;
-AudioSDR mySDR;
-AudioControlSGTL5000 codec;
-//
-AudioConnection c1(input, 0, mySDR, 0);
-AudioConnection c2(input 1, mySDR, 1);
-AudioConnection c1(mySDR, 0, output, 0);
-AudioConnection c1(mySDR, 0, output, 1);
-// ***/
-
-// AudioSDR 2nd example
-// Required "includes"
 #include <Arduino.h>
 #include <Audio.h>
 #include "arm_math.h"
@@ -165,37 +148,18 @@ int i,j,r,g,b;
   ts.setRotation(1);
  
   // Audio SDR
-//  AudioMemory(20);
-//  AudioNoInterrupts();
-//  codec.inputSelect(AUDIO_INPUT_LINEIN);
-//  codec.volume(0.7);
-//  codec.lineInLevel(15);  // Set codec input voltage level to most sensitive
-//  codec.lineOutLevel(13); // Set codec output voltage level to most sensitive
- // codec.enable();
- // AudioInterrupts();
- // delay(500);
-  //
-  // tuningOffset = (int32_t)SDR.setDemodMode(LSBmode); // Select LSB mode and return its tuning offset
-  // frequency = 7150000.0; // Start listening at 7.15 MHz
-  // displayFrequency(frequency); // Update the front panel display
-  // tuner.setFrequency(frequency-tuningOffset); // Set rf quadrature oscillator freq.
-  //
   preProcessor.startAutoI2SerrorDetection(); // Start I2S error detection
   preProcessor.swapIQ(false);
 
   SDR.setInputGain(2.0);
   SDR.setOutputGain(5.0);
   SDR.setAudioFilter(audio2900);        // Overide the default 2700 Hz LSB audio filter
-  
-     // sounds like no BFO with some of these settings
-     // noiseBlanker threshold too low or not disabled
-  SDR.setNoiseBlankerThresholdDb(10.0);  // Set threshold to 5dB above average level. 5 too low
+  SDR.setNoiseBlankerThresholdDb(20.0);  // Set threshold to 5dB above average level. 5 too low
   //SDR.enableNoiseBlanker(); 
   SDR.disableNoiseBlanker();
   SDR.disableALSfilter();
   SDR.enableAGC();
   SDR.setAGCmode(AGCmedium);
-  //
 
   // --- Set up the Audio board
   AudioMemory(40);    //20
@@ -249,16 +213,16 @@ int32_t t;
    t = touch();
    if( t ){
       // dispatch to who owns the touch screen
-      tft.setTextSize(2);  // !!! all debug code here
-      tft.setTextColor(ILI9341_YELLOW,ILI9341_NAVY);
-      tft.setCursor(0,45);
-      tft.println("          ");
-      tft.println("          ");
-      tft.setCursor(0,45);
-      tft.println(t >> 8);   // x
-      tft.println(t & 0xff);  // y
+      //tft.setTextSize(2);  // !!! all debug code here
+      //tft.setTextColor(ILI9341_YELLOW,ILI9341_NAVY);
+      //tft.setCursor(0,45);
+      //tft.println("          ");
+      //tft.println("          ");
+      //tft.setCursor(0,45);
+      //tft.println(t >> 8);   // x
+      //tft.println(t & 0xff);  // y
 
-      // test keyboard
+      // testing the keyboard
       key_tx(t);
    }
 
@@ -388,39 +352,6 @@ int pos;
    */ 
 }
 
-void vfo_freq_disp(){
-int val;
-int32_t VFO;
-
-   VFO = vfo_a + tuningOffset - 700;
-
-   vfo_freq_disp_alt(); // !!! testing
-   return;
-   
-   tft.setTextSize(2);
-   tft.setCursor(5,20);
-   tft.setTextColor(EGA[10],0);
-   if( VFO < 10000000 ) tft.write(' ');
-   tft.print(VFO / 1000);
-   tft.write('.');
-   p_leading(VFO % 1000,3);
-   
-   tft.setCursor(135,20);
-   if( vfo_b < 10000000 ) tft.write(' ');
-   tft.print(vfo_b / 1000);
-   tft.write('.');
-   p_leading(vfo_b % 1000,3 );
-
-   val = rit;
-   if( val < 0 ){
-      val = - val;
-      tft.setTextColor(EGA[12],0);       // change color instead of displaying the minus sign
-   }
-   tft.setCursor(265,20);
-   p_leading(val,4);
-
-}
-
 
 void p_leading( int val, int digits ){    // print a number with leading zeros without using sprintf
 int test;
@@ -447,13 +378,14 @@ int test;
 #define DP_ 128
 uint8_t segment[16] = {0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f,0x77,0x7c,0x58,0x5e,0x79,0x71};
 
-void vfo_freq_disp_alt(){
+void vfo_freq_disp(){
 int32_t vfo;
 int32_t digit;
 int i,mult;
 
    if( vfo_mode & VFO_B ) vfo = vfo_b;
    else vfo = vfo_a;
+   vfo += tuningOffset - 700;
 
    // 40 meter radio, ignore 10 meg digit for now
    mult = 1000000;
@@ -502,94 +434,107 @@ uint16_t color;
 #define VS 35     //40
 #define HB 20     //20
 #define HS 32     //30
- 
+
+ // slanted verticals have strange looking jaggies, try all horizontal lines
 void draw_A( int pos, uint16_t color ){
 int zz;
+int i;
 
    zz = HB + HS * pos;
-   tft.drawLine(zz+12, VB,   zz+25, VB, color);
-   tft.drawLine(zz+12, VB+1, zz+25, VB+1, color);
-   tft.drawLine(zz+12, VB+2, zz+25, VB+2, color);
-   tft.drawLine(zz+12, VB+3, zz+25, VB+3, color);
-  
+   for( i = 0; i < 4; ++i ) tft.drawFastHLine( zz+12,VB+i,13,color);
 }
+
+void draw_G( int pos, uint16_t color ){
+int zz;
+int i,k;
+  
+   zz = HB + HS * pos;
+   for( i = 0; i < 4; ++i ){
+      k = ( i == 1 || i == 2 ) ? 2 : 0;
+      tft.drawFastHLine( zz+9-k,VB+VS/2+i-2,13 + 2*k,color);
+   }
+}
+
+void draw_D( int pos, uint16_t color ){
+int zz;
+int i;
+  
+   zz = HB + HS * pos;
+   for( i = 0; i < 4; ++i ) tft.drawFastHLine( zz+6,VB+VS-i,13,color);
+}
+
+void draw_B( int pos, uint16_t color ){
+int zz;
+int i,len;
+
+   zz = HB + HS * pos +27;
+   len = 1;
+   for( i = 0; i < VS/2; ++i ){
+      tft.drawFastHLine( zz,VB+i,len,color);
+      if( i < 4 && len < 4 ) ++len;
+      if( i > VS/2 - 4 ) ++zz, --len;
+      if( i == VS/8 ) --zz;
+      if( i == VS/4 ) --zz;
+      if( i == 3*VS/8 ) --zz;
+   }
+}
+
+void draw_C( int pos, uint16_t color ){
+int zz;
+int i,len;
+  
+   zz = HB + HS * pos + 27;
+   len = 1;
+   for( i = 0; i < VS/2; ++i ){
+      tft.drawFastHLine( zz,VB+VS/2+i,len,color);
+      if( i < 4 && len < 4 ) ++len, --zz;
+      if( i > VS/2 - 4 ) --len;
+      if( i == VS/8 ) --zz;
+      if( i == VS/4 ) --zz;
+      if( i == 3*VS/8 ) --zz;      
+   } 
+}
+
+void draw_E( int pos, uint16_t color ){
+int zz;
+int i,len;
+
+   zz = HB + HS * pos + 4;
+
+   len = 1;
+   for( i = 0; i < VS/2; ++i ){
+      tft.drawFastHLine( zz,VB+VS/2+i,len,color);
+      if( i < 4 && len < 4 ) ++len;
+      if( i > VS/2 - 4 ) --len, ++zz;
+      if( i == VS/8 ) --zz;
+      if( i == VS/4 ) --zz;
+      if( i == 3*VS/8 ) --zz;      
+   } 
+}
+
+void draw_F( int pos, uint16_t color ){
+int zz;
+int i,len;
+
+   zz = HB + HS * pos + 10;
+
+   len = 1;
+   for( i = 0; i < VS/2; ++i ){
+      tft.drawFastHLine( zz,VB+i,len,color);
+      if( i < 4 && len < 4 ) ++len, --zz;
+      if( i > VS/2 - 4 ) --len, ++zz;
+      if( i == VS/8 ) --zz;
+      if( i == VS/4 ) --zz;
+      if( i == 3*VS/8 ) --zz;      
+   } 
+}
+
 
 void draw_DP( int pos, uint16_t color ){
 int zz;
 
    zz = HB + HS * pos;
-   tft.drawLine(zz+HS-5, VB+VS-1,zz+HS-2, VB+VS-1, color);
-   tft.drawLine(zz+HS-5, VB+VS-2, zz+HS-2, VB+VS-2, color);
-   tft.drawLine(zz+HS-5, VB+VS-3, zz+HS-2, VB+VS-3, color);
-  
-}
-
-
-void draw_B( int pos, uint16_t color ){
-int zz;
-
-   zz = HB + HS * pos +27;
-   tft.drawLine(zz, VB, zz-3, VB+VS/2-3, color);
-   tft.drawLine(zz+1, VB+1, zz-2, VB+VS/2-2, color);
-   tft.drawLine(zz+2, VB+2, zz-1, VB+VS/2-1, color);
-   tft.drawLine(zz+3, VB+3, zz, VB+VS/2, color);
-  
-}
-
-void draw_F( int pos, uint16_t color ){
-int zz;
-
-   zz = HB + HS * pos;
-   tft.drawLine(zz+10, VB, zz+8, VB+VS/2-4, color);
-   tft.drawLine(zz+9, VB+1, zz+7, VB+VS/2-3, color);
-   tft.drawLine(zz+8, VB+2, zz+6, VB+VS/2-2, color);
-   tft.drawLine(zz+7, VB+3, zz+5, VB+VS/2-1, color);
-  
-}
-
-
-void draw_C( int pos, uint16_t color ){
-int zz;
-  
-   zz = HB + HS * pos + 24;
-   tft.drawLine(zz, VB+VS/2+3, zz-3, VB+VS-1, color);
-   tft.drawLine(zz+1, VB+VS/2+2, zz-2, VB+VS-2, color);
-   tft.drawLine(zz+2, VB+VS/2+1, zz-1, VB+VS-3, color);
-   tft.drawLine(zz+3, VB+VS/2, zz, VB+VS-4, color);
-  
-}
-
-void draw_E( int pos, uint16_t color ){
-int zz;
-  
-   zz = HB + HS * pos;
-   tft.drawLine(zz+7, VB+VS/2+3, zz+4, VB+VS, color);
-   tft.drawLine(zz+6, VB+VS/2+2, zz+3, VB+VS-1, color);
-   tft.drawLine(zz+5, VB+VS/2+1, zz+2, VB+VS-2, color);
-   tft.drawLine(zz+4, VB+VS/2, zz+1, VB+VS-3, color);
-  
-}
-
-
-void draw_D( int pos, uint16_t color ){
-int zz;
-  
-   zz = HB + HS * pos;
-   tft.drawLine(zz+6, VB+VS, zz+20, VB+VS, color);
-   tft.drawLine(zz+6, VB+VS-1, zz+20, VB+VS-1, color);
-   tft.drawLine(zz+6, VB+VS-2, zz+20, VB+VS-2, color);
-   tft.drawLine(zz+6, VB+VS-3, zz+20, VB+VS-3, color);
-  
-}
-void draw_G( int pos, uint16_t color ){
-int zz;
-  
-   zz = HB + HS * pos;
-   tft.drawLine(zz+10, VB+VS/2+1, zz+21, VB+VS/2+1, color);
-   tft.drawLine(zz+9, VB+VS/2,  zz+22, VB+VS/2, color);
-   tft.drawLine(zz+9, VB+VS/2-1, zz+22, VB+VS/2-1, color);
-   tft.drawLine(zz+10, VB+VS/2-2, zz+21, VB+VS/2-2, color);
-  
+   tft.fillRect(zz+HS-5, VB+VS-1, 3, 3, color);
 }
 
 
@@ -777,3 +722,40 @@ static int loc;
 //  tft.println(" 7122.030");
 //  tft.setTextColor(ILI9341_GREEN);
 //  tft.print(" 7038.600");
+
+
+/***************************** old code
+  void vfo_freq_disp(){
+int val;
+int32_t VFO;
+
+   VFO = vfo_a + tuningOffset - 700;
+
+   vfo_freq_disp_alt(); // !!! testing
+   return;
+   
+   tft.setTextSize(2);
+   tft.setCursor(5,20);
+   tft.setTextColor(EGA[10],0);
+   if( VFO < 10000000 ) tft.write(' ');
+   tft.print(VFO / 1000);
+   tft.write('.');
+   p_leading(VFO % 1000,3);
+   
+   tft.setCursor(135,20);
+   if( vfo_b < 10000000 ) tft.write(' ');
+   tft.print(vfo_b / 1000);
+   tft.write('.');
+   p_leading(vfo_b % 1000,3 );
+
+   val = rit;
+   if( val < 0 ){
+      val = - val;
+      tft.setTextColor(EGA[12],0);       // change color instead of displaying the minus sign
+   }
+   tft.setCursor(265,20);
+   p_leading(val,4);
+
+}
+ 
+ */
