@@ -27,6 +27,7 @@
 #include <Audio.h>
 #include "arm_math.h"
 #include "arm_const_structs.h"
+#include "AudioSDR.h"            // added rwc
 #include "AudioSDRlib.h"
 
 // --- Audio Block elements
@@ -45,9 +46,9 @@ AudioConnection c4(preProcessor,1, spectrumData,1);
 AudioConnection c5(preProcessor,0, SDR,0);
 AudioConnection c6(preProcessor,1, SDR,1);
 AudioConnection c7(SDR,0, audioOut,0);
-AudioConnection c8(SDR,0, audioOut,1);    // or SDR,1
+AudioConnection c8(SDR,0, audioOut,1);
 //
-int32_t tuningOffset;     // function returns float, cast to int32 for this radio.
+int32_t tuning_offset;     // function returns float, cast to int32 for this radio.
 
 
          //  4bpp pallett  0-3, 4-7, 8-11, 12-15
@@ -112,6 +113,7 @@ int dpos;                       // current cursor position
 // screen owners
 #define DECODE 0
 #define KEYBOARD 1
+#define MENUS    2
 uint8_t  screen_owner = DECODE;
 
 char kb[5][10] = { \
@@ -121,7 +123,127 @@ char kb[5][10] = { \
    { 'Z','X','C','V','B','N','M',',','.','/' }, \
    { '*','*',' ',' ','?','=',' ',' ',' ',' ' }  \
 };
+
+// Menu's
+
+void (* menu_dispatch )( int32_t );    // pointer to function that is processing screen touches
+
+
+struct menu {
+   char title[16];
+   char *menu_item[8];
+   int16_t param[8];            // parameter to pass to SDR to implement the menu selection 
+   int y_size;                  // x size will be half the screen, two items on a line for now
+   int color;
+};
+
+// mode menu items
+char m_qcx[] = " OFF";    // native qcx mode using hardware decode, built in filter, no agc
+char m_cw[]  = " CW 400";
+char m_lsb[] = " LSB";
+char m_usb[] = " USB";
+char m_am[]  = " AM";
+char m_sam[] = " SAM";
+
+struct menu mode_menu_data = {
+   { "SDR Mode" },
+   { m_qcx,m_cw,m_lsb,m_usb,m_am,m_sam },
+   { 0,CW_USBmode,LSBmode,USBmode,AMmode,SAMmode,-1,-1 },
+   48,
+   ILI9341_PURPLE 
+};
+   
+
 /********************************************************************************/
+
+// touch the screen top,middle,bottom to bring up different menus.  Assign menu_dispatch.
+// This is default touch processing.   No menu on the screen.
+void hidden_menu( int32_t t ){
+
+   screen_owner = MENUS;
+   
+   // just check the y value of touch to see what menu is wanted
+   // !!! only have one menu at present
+   menu_display( &mode_menu_data );
+   menu_dispatch = &mode_menu;        // screen touch goes to mode_menu() now
+     
+}
+
+void mode_menu( int32_t t ){
+int selection;
+
+   selection = touch_decode( t, mode_menu_data.y_size );
+   if( mode_menu_data.param[selection] != -1 ){
+      // selection 0 is a special case.  Disable SDR and enable QCX.
+      if( selection == 0 ){
+         // !!! enable the QCX audio
+         SDR.setMute(true);
+      }
+      else{
+         tuning_offset = (int32_t)SDR.setDemodMode(mode_menu_data.param[selection]);
+         SDR.setMute(false);
+         // !!! mute the QCX native audio
+      }
+   }
+
+   menu_cleanup(); 
+}
+
+void menu_cleanup(){
+
+   // exit touch menu and back to normal screen
+   menu_dispatch = &hidden_menu;
+   tft.fillScreen(ILI9341_BLACK);
+   screen_owner = DECODE;
+   vfo_mode_disp();
+   vfo_freq_disp();
+}
+
+void band_width_menu( int32_t t ){
+  
+}
+
+void decode_menu( int32_t t ){
+  
+}
+
+void menu_display( struct menu *m ){    // display any of the menus on the screen
+int i,x,y;                              // other functions handle selections
+
+   tft.setTextColor( ILI9341_WHITE, m->color );  // text is white on background color 
+   tft.fillScreen(ILI9341_BLACK);                // border of menu items is black
+
+   // title box
+   tft.fillRect(5,5,320-10,m->y_size-10,m->color);
+   tft.setCursor( 10,10 );
+   if( m->y_size > 45 ) tft.setTextSize(3);
+   else tft.setTextSize(2);
+   tft.print(m->title);
+   
+   // draw some menu boxes, two per row for now
+   y = m->y_size; x = 0;
+   for( i = 0; i < 8; ++i ){
+      if( m->menu_item[i][0] == 0 ) break;       // null option
+      if( y + m->y_size-10  > 239 ) break;       // screen is full
+      tft.fillRect(x+5,y+5,160-10,m->y_size-10,m->color);
+      tft.setCursor( x+10,y+10 );
+      tft.print(m->menu_item[i]);
+      x += 160;
+      if( x >= 320 ) x = 0, y += m->y_size;
+   }
+}
+
+int touch_decode( int32_t t, int y_size ){    // selection for 2 items wide touch menu
+int32_t x,y;
+
+   y = t & 0xff;
+   x = t >> 8;
+   y -= y_size;    // top row is the title
+   y /= y_size;    // row of the touch
+   x /= 160;       // column 
+   return 2*y + x; // two menu items per row
+}
+
 void setup() {
 int i,j,r,g,b;
 
@@ -172,9 +294,10 @@ int i,j,r,g,b;
   AudioInterrupts();
   delay(200);
   //
-  tuningOffset = (int32_t)SDR.setDemodMode(LSBmode); // Select LSB mode and return its tuning offset
+  tuning_offset = (int32_t)SDR.setDemodMode(LSBmode); // Select LSB mode and return its tuning offset
   SDR.setMute(false);
 
+  menu_dispatch = &hidden_menu;     // function pointer
 }
 
 
@@ -212,18 +335,8 @@ int32_t t;
 
    t = touch();
    if( t ){
-      // dispatch to who owns the touch screen
-      //tft.setTextSize(2);  // !!! all debug code here
-      //tft.setTextColor(ILI9341_YELLOW,ILI9341_NAVY);
-      //tft.setCursor(0,45);
-      //tft.println("          ");
-      //tft.println("          ");
-      //tft.setCursor(0,45);
-      //tft.println(t >> 8);   // x
-      //tft.println(t & 0xff);  // y
-
-      // testing the keyboard
-      key_tx(t);
+      // goto where menu_dispatch() points
+      (*menu_dispatch)(t);    // off to whoever owns the touchscreen
    }
 
 
@@ -303,6 +416,7 @@ void vfo_mode_disp(){
 int a,b,s,r;
 int pos;
 
+   if( screen_owner != DECODE ) return;
    a = b = s = r = 0;                       // set colors of the vfo mode
    if( vfo_mode & VFO_B ) b = 10;
    else a = 10;
@@ -383,9 +497,10 @@ int32_t vfo;
 int32_t digit;
 int i,mult;
 
+   if( screen_owner != DECODE ) return;
    if( vfo_mode & VFO_B ) vfo = vfo_b;
    else vfo = vfo_a;
-   vfo += tuningOffset - 700;
+   vfo += tuning_offset - 700;
 
    // 40 meter radio, ignore 10 meg digit for now
    mult = 1000000;
@@ -729,7 +844,7 @@ static int loc;
 int val;
 int32_t VFO;
 
-   VFO = vfo_a + tuningOffset - 700;
+   VFO = vfo_a + tuning_offset - 700;
 
    vfo_freq_disp_alt(); // !!! testing
    return;
