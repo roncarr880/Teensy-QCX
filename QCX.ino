@@ -1,8 +1,8 @@
 /*
  *   QCX with Teensy 3.6, Audio shield, and ILI9341 touchscreen added on QCX Dev Board.
- *   AudioSDR library.
+ *   Building upon ZL2CTM inspired code.
  * 
-
+     
    Free pins when using audio board and display.
    Teensy 3.6.  Many more pins unused but not populated with headers.
    
@@ -12,43 +12,61 @@
   4
   5
   8      used for touch CS
- 16
- 17
+ 16      A2
+ 17      A3
+
+
+ Considering: re-sample qcx audio and lineout audio and using DAC0 to pass audio
+ to the top of the volume control.  This will allow software selection of the
+ output as well as access to audio data for decoders. The qcx audio can be provided
+ with AGC and/or clipping/filter for hearing protection.
 
  *******************************************************************************/
 
 
-#include "SPI.h"
-#include "ILI9341_t3.h"
+#include <ILI9341_t3.h>
 #include <XPT2046_Touchscreen.h>
-
-// AudioSDR Library
-#include <Arduino.h>
 #include <Audio.h>
-#include "arm_math.h"
-#include "arm_const_structs.h"
-#include "AudioSDR.h"            // added rwc
-#include "AudioSDRlib.h"
+#include <Wire.h>
+#include <SPI.h>
 
-// --- Audio Block elements
-AudioInputI2S IQinput;
-AudioSDRpreProcessor preProcessor; // For I2S error detection and compensation
-AudioGrabberComplex256 spectrumData; // For extraction of data for spectrum display
-AudioSDR SDR;
-AudioOutputI2S audioOut;
-AudioControlSGTL5000 codec;
-//---
-// Audio Block connections
-AudioConnection c1(IQinput,0, preProcessor,0);
-AudioConnection c2(IQinput,1, preProcessor,1);
-AudioConnection c3(preProcessor,0, spectrumData,0);
-AudioConnection c4(preProcessor,1, spectrumData,1);
-AudioConnection c5(preProcessor,0, SDR,0);
-AudioConnection c6(preProcessor,1, SDR,1);
-AudioConnection c7(SDR,0, audioOut,0);
-AudioConnection c8(SDR,0, audioOut,1);
-//
-int32_t tuning_offset;     // function returns float, cast to int32 for this radio.
+#include "hilbert.h"
+
+
+// GUItool: begin automatically generated code
+// IIR bandwidth filter version.
+// FIR constants are picked up in reverse order, so may have to switch H45plus and H45minus
+// as they seem to have the same constants, just reverse order.
+AudioInputI2S            LineIn;           //xy=55,254
+AudioFilterFIR           H45minus;           //xy=168,338
+AudioFilterFIR           H45plus;           //xy=169,175
+//AudioAnalyzeFFT256       LSBscope;       //xy=349,445
+AudioMixer4              LSBmixer;         //xy=352,328
+AudioMixer4              USBmixer;         //xy=355,181
+//AudioAnalyzeFFT256       USBscope;       //xy=356,63
+AudioMixer4              SSBselect;         //xy=455,256
+//AudioAnalyzePeak         peak1;          //xy=485.55556869506836,107.77777481079102
+//AudioAnalyzeRMS          rms1;           //xy=615.5555839538574,139.99999809265137
+AudioOutputI2S           LineOut;           //xy=619.4443702697754,391.0000190734863
+AudioFilterBiquad        BandWidth;        //xy=645,255
+AudioConnection          patchCord1(LineIn, 0, H45plus, 0);
+AudioConnection          patchCord2(LineIn, 1, H45minus, 0);
+AudioConnection          patchCord3(H45minus, 0, USBmixer, 2);
+AudioConnection          patchCord4(H45minus, 0, LSBmixer, 2);
+AudioConnection          patchCord5(H45plus, 0, USBmixer, 1);
+AudioConnection          patchCord6(H45plus, 0, LSBmixer, 1);
+//AudioConnection          patchCord7(LSBmixer, LSBscope);
+AudioConnection          patchCord8(LSBmixer, 0, SSBselect, 2);
+//AudioConnection          patchCord9(USBmixer, USBscope);
+AudioConnection          patchCord10(USBmixer, 0, SSBselect, 1);
+//AudioConnection          patchCord11(USBmixer, peak1);
+AudioConnection          patchCord12(SSBselect, BandWidth);
+//AudioConnection          patchCord13(BandWidth, rms1);
+AudioConnection          patchCord14(BandWidth, 0, LineOut, 0);
+AudioConnection          patchCord15(BandWidth, 0, LineOut, 1);
+AudioControlSGTL5000     codec;     //xy=86,63
+// GUItool: end automatically generated code
+
 
 
          //  4bpp pallett  0-3, 4-7, 8-11, 12-15
@@ -132,9 +150,10 @@ void (* menu_dispatch )( int32_t );    // pointer to function that is processing
 struct menu {
    char title[16];
    char *menu_item[8];
-   int16_t param[8];            // parameter to pass to SDR to implement the menu selection 
+   int param[8];
    int y_size;                  // x size will be half the screen, two items on a line for now
    int color;
+   int current;
 };
 
 // mode menu items
@@ -144,105 +163,37 @@ char m_lsb[] = " LSB";
 char m_usb[] = " USB";
 char m_am[]  = " AM";
 char m_sam[] = " SAM";
+char m_data[]= " DATA";
 
 struct menu mode_menu_data = {
    { "SDR Mode" },
-   { m_qcx,m_cw,m_lsb,m_usb,m_am,m_sam },
-   { 0,CW_USBmode,LSBmode,USBmode,AMmode,SAMmode,-1,-1 },
+   { m_qcx,m_cw,m_lsb,m_usb,m_am,m_sam,m_data },
+   {0,2,1,2,-1,-1,-1,-1},
    48,
-   ILI9341_PURPLE 
+   ILI9341_PURPLE,
+   2
 };
-   
+
+char w_am[] =     " AM 3900";
+char w_bypass[] = " AM Wide";
+char w_2500[] =   " 2500";
+char w_2700[] =   " 2700";
+char w_2900[] =   " 2900";
+char w_3100[] =   " 3100";
+char w_3300[] =   " 3300";
+char w_data[] =   " DATA";
+struct menu band_width_menu_data = {
+   { "Band Width" },
+   { w_am, w_bypass, w_2500, w_2700, w_2900, w_3100, w_3300, w_data },
+   { 5000, 10000, 3200, 3400, 3600, 3800, 4000, 2100 },      // set wider, 12 db down point?
+   48,
+   ILI9341_MAROON,
+   6
+};
+
+
 
 /********************************************************************************/
-
-// touch the screen top,middle,bottom to bring up different menus.  Assign menu_dispatch.
-// This is default touch processing.   No menu on the screen.
-void hidden_menu( int32_t t ){
-
-   screen_owner = MENUS;
-   
-   // just check the y value of touch to see what menu is wanted
-   // !!! only have one menu at present
-   menu_display( &mode_menu_data );
-   menu_dispatch = &mode_menu;        // screen touch goes to mode_menu() now
-     
-}
-
-void mode_menu( int32_t t ){
-int selection;
-
-   selection = touch_decode( t, mode_menu_data.y_size );
-   if( mode_menu_data.param[selection] != -1 ){
-      // selection 0 is a special case.  Disable SDR and enable QCX.
-      if( selection == 0 ){
-         // !!! enable the QCX audio
-         SDR.setMute(true);
-      }
-      else{
-         tuning_offset = (int32_t)SDR.setDemodMode(mode_menu_data.param[selection]);
-         SDR.setMute(false);
-         // !!! mute the QCX native audio
-      }
-   }
-
-   menu_cleanup(); 
-}
-
-void menu_cleanup(){
-
-   // exit touch menu and back to normal screen
-   menu_dispatch = &hidden_menu;
-   tft.fillScreen(ILI9341_BLACK);
-   screen_owner = DECODE;
-   vfo_mode_disp();
-   vfo_freq_disp();
-}
-
-void band_width_menu( int32_t t ){
-  
-}
-
-void decode_menu( int32_t t ){
-  
-}
-
-void menu_display( struct menu *m ){    // display any of the menus on the screen
-int i,x,y;                              // other functions handle selections
-
-   tft.setTextColor( ILI9341_WHITE, m->color );  // text is white on background color 
-   tft.fillScreen(ILI9341_BLACK);                // border of menu items is black
-
-   // title box
-   tft.fillRect(5,5,320-10,m->y_size-10,m->color);
-   tft.setCursor( 10,10 );
-   if( m->y_size > 45 ) tft.setTextSize(3);
-   else tft.setTextSize(2);
-   tft.print(m->title);
-   
-   // draw some menu boxes, two per row for now
-   y = m->y_size; x = 0;
-   for( i = 0; i < 8; ++i ){
-      if( m->menu_item[i][0] == 0 ) break;       // null option
-      if( y + m->y_size-10  > 239 ) break;       // screen is full
-      tft.fillRect(x+5,y+5,160-10,m->y_size-10,m->color);
-      tft.setCursor( x+10,y+10 );
-      tft.print(m->menu_item[i]);
-      x += 160;
-      if( x >= 320 ) x = 0, y += m->y_size;
-   }
-}
-
-int touch_decode( int32_t t, int y_size ){    // selection for 2 items wide touch menu
-int32_t x,y;
-
-   y = t & 0xff;
-   x = t >> 8;
-   y -= y_size;    // top row is the title
-   y /= y_size;    // row of the touch
-   x /= 160;       // column 
-   return 2*y + x; // two menu items per row
-}
 
 void setup() {
 int i,j,r,g,b;
@@ -269,35 +220,157 @@ int i,j,r,g,b;
   ts.begin();                        // touchscreen
   ts.setRotation(1);
  
-  // Audio SDR
-  preProcessor.startAutoI2SerrorDetection(); // Start I2S error detection
-  preProcessor.swapIQ(false);
+  menu_dispatch = &hidden_menu;     // function pointer for screen touch
 
-  SDR.setInputGain(2.0);
-  SDR.setOutputGain(5.0);
-  SDR.setAudioFilter(audio2900);        // Overide the default 2700 Hz LSB audio filter
-  SDR.setNoiseBlankerThresholdDb(20.0);  // Set threshold to 5dB above average level. 5 too low
-  //SDR.enableNoiseBlanker(); 
-  SDR.disableNoiseBlanker();
-  SDR.disableALSfilter();
-  SDR.enableAGC();
-  SDR.setAGCmode(AGCmedium);
-
-  // --- Set up the Audio board
-  AudioMemory(40);    //20
+   // Setup the audio shield
   AudioNoInterrupts();
+  AudioMemory(20);
   codec.enable();
-  codec.inputSelect(AUDIO_INPUT_LINEIN);
-  codec.volume(0.5);
-  codec.lineInLevel(15);  // Set codec input voltage level to most sensitive
-  codec.lineOutLevel(13); // Set codec output voltage level to most sensitive
-  AudioInterrupts();
-  delay(200);
-  //
-  tuning_offset = (int32_t)SDR.setDemodMode(LSBmode); // Select LSB mode and return its tuning offset
-  SDR.setMute(false);
+  codec.volume(0.6);                        // headphones, not used eventually
+  codec.unmuteHeadphone();
+  codec.inputSelect( AUDIO_INPUT_LINEIN );  
+  codec.lineInLevel(12);                    // 0 to 15  !!! use as attenuator, reduce gain on loud signals
+  codec.lineOutLevel(20);                   // 13 to 31 with 13 the loudest.  Use to balance gain with
+                                            // the QCX signal level.  One time adjustment.
+  // dacVolume  ? does it effect lineout or just headphones
+  // autoVolume ? Built in AGC.  Is it input or output feature?
+ // H45plus.begin(h45p,HILBERT_SIZE);
+ // H45minus.begin(h45m,HILBERT_SIZE);
+  H45plus.begin(h90p,HILBERT_SIZE);        // try the 90deg and 0deg phase shift filters
+  H45minus.begin(h00m,HILBERT_SIZE);
+  USBmixer.gain(1,1.0);                    // add signals get USB.   Lower gain if addition causes clipping.
+  USBmixer.gain(2,1.0);
+  LSBmixer.gain(1,1.0);                    // sub signals get LSB
+  LSBmixer.gain(2,-1.0);
 
-  menu_dispatch = &hidden_menu;     // function pointer
+  SSBselect.gain(1,0.0);                   // turn off USB
+  SSBselect.gain(2,1.0);                   // LSB is default on startup
+
+  BandWidth.setLowpass(0,4000,0.7);        // do all of these need to be configured?
+  BandWidth.setLowpass(1,4000,0.7);
+  BandWidth.setLowpass(2,4000,0.7);
+  BandWidth.setLowpass(3,4000,0.7);        // 12 db down at 4000 now?
+    
+  AudioInterrupts();
+  
+}
+
+
+
+// touch the screen top,middle,bottom to bring up different menus.  Assign menu_dispatch.
+// This is default touch processing.   No menu on the screen.
+void hidden_menu( int32_t t ){
+
+   screen_owner = MENUS;
+   
+   // just check the y value of touch to see what menu 
+   t = t & 0xff;
+   if( t < 60 ){
+      menu_display( &mode_menu_data );
+      menu_dispatch = &mode_menu;        // screen touch goes to mode_menu() now
+   }
+   else if ( t < 140 ){ 
+      menu_display( &band_width_menu_data );
+      menu_dispatch = &band_width_menu;
+   }
+   
+   else screen_owner = DECODE;           // screen area not defined 
+}
+
+void mode_menu( int32_t t ){
+int selection;
+
+   selection = touch_decode( t, mode_menu_data.y_size );
+   if( mode_menu_data.param[selection] != -1 ){
+      mode_menu_data.current = selection;
+      selection = mode_menu_data.param[selection];
+      // selection 0 is a special case.  Disable SDR and enable QCX.
+      if( selection == 0 ){
+         // !!! enable the QCX audio
+      }
+      else{
+        if( selection == 1 ){
+            SSBselect.gain(1,0.0);                   // turn on LSB
+            SSBselect.gain(2,1.0);
+        }
+        if( selection == 2 ){
+            SSBselect.gain(1,1.0);                   // turn on USB
+            SSBselect.gain(2,0.0);  
+        }
+      }
+   }
+
+   menu_cleanup(); 
+}
+
+void menu_cleanup(){
+
+   // exit touch menu and back to normal screen
+   menu_dispatch = &hidden_menu;
+   tft.fillScreen(ILI9341_BLACK);
+   screen_owner = DECODE;
+   vfo_mode_disp();
+   vfo_freq_disp();
+}
+
+void band_width_menu( int32_t t ){
+int sel;
+
+   sel = touch_decode( t, band_width_menu_data.y_size );
+   if( band_width_menu_data.param[sel] != -1 ){
+      band_width_menu_data.current = sel;
+      sel = band_width_menu_data.param[sel];
+     //Serial.println(sel);
+      BandWidth.setLowpass(0,sel,0.7);        // do all of these need to be configured?
+      BandWidth.setLowpass(1,sel,0.7);
+      BandWidth.setLowpass(2,sel,0.7);
+      BandWidth.setLowpass(3,sel,0.7);        // 12 db down at 4000 now?
+   }
+   
+   menu_cleanup();
+}
+
+void decode_menu( int32_t t ){
+  
+}
+
+void menu_display( struct menu *m ){    // display any of the menus on the screen
+int i,x,y;                              // other functions handle selections
+
+   tft.setTextColor( ILI9341_WHITE, m->color );  // text is white on background color 
+   tft.fillScreen(ILI9341_BLACK);                // border of menu items is black
+
+   // title box
+   tft.fillRect(5,5,320-10,m->y_size-10,m->color);
+   tft.setCursor( 10,10 );
+   if( m->y_size > 45 ) tft.setTextSize(3);
+   else tft.setTextSize(2);
+   tft.print(m->title);
+   
+   // draw some menu boxes, two per row for now
+   y = m->y_size; x = 0;
+   for( i = 0; i < 8; ++i ){
+      if( m->menu_item[i][0] == 0 ) break;       // null option
+      if( y + m->y_size-10  > 239 ) break;       // screen is full
+      tft.fillRect(x+5,y+5,160-10,m->y_size-10,m->color);
+      tft.setCursor( x+10,y+10 );
+      if( i == m->current ) tft.setTextColor( ILI9341_YELLOW, m->color );
+      else tft.setTextColor( ILI9341_WHITE, m->color );
+      tft.print(m->menu_item[i]);
+      x += 160;
+      if( x >= 320 ) x = 0, y += m->y_size;
+   }
+}
+
+int touch_decode( int32_t t, int y_size ){    // selection for 2 items wide touch menu
+int32_t x,y;
+
+   y = t & 0xff;
+   x = t >> 8;
+   y -= y_size;    // top row is the title
+   y /= y_size;    // row of the touch
+   x /= 160;       // column 
+   return 2*y + x; // two menu items per row
 }
 
 
@@ -414,7 +487,7 @@ static uint8_t   z;
 
 void vfo_mode_disp(){
 int a,b,s,r;
-int pos;
+// int pos;
 
    if( screen_owner != DECODE ) return;
    a = b = s = r = 0;                       // set colors of the vfo mode
@@ -500,8 +573,9 @@ int i,mult;
    if( screen_owner != DECODE ) return;
    if( vfo_mode & VFO_B ) vfo = vfo_b;
    else vfo = vfo_a;
-   vfo += tuning_offset - 700;
 
+   if( 1 ) vfo -= 700;   // !!! cw mode flag needed
+   
    // 40 meter radio, ignore 10 meg digit for now
    mult = 1000000;
    for( i = 0; i < 7; ++i ){
@@ -671,8 +745,8 @@ char c;
     if( c != ';' ) return;               // command not complete yet
 
     // debug   !!! comment out
-    response[len+1] = 0;
-    Serial.println(response);            // !!! debug
+    //response[len+1] = 0;
+    //Serial.println(response);            // !!! debug
 
     response[len] = 0;                   // terminate string removing ; on the end
 
@@ -872,5 +946,326 @@ int32_t VFO;
    p_leading(val,4);
 
 }
- 
+
+70
+
+  (short)(32768 * -0.000287988910943357),
+  (short)(32768 * -0.000383511439791303),
+  (short)(32768 * -0.000468041804899774),
+  (short)(32768 * -0.000529324432676899),
+  (short)(32768 * -0.000569479602046985),
+  (short)(32768 * -0.000616670267768531),
+  (short)(32768 * -0.000731530748681977),
+  (short)(32768 * -0.001002372095321225),
+  (short)(32768 * -0.001525299390682192),
+  (short)(32768 * -0.002370114347025230),
+  (short)(32768 * -0.003539247773172147),
+  (short)(32768 * -0.004932965382552984),
+  (short)(32768 * -0.006337182914262393),
+  (short)(32768 * -0.007448193692118567),
+  (short)(32768 * -0.007940501940620482),
+  (short)(32768 * -0.007570802072162988),
+  (short)(32768 * -0.006296120449841751),
+  (short)(32768 * -0.004371955618154949),
+  (short)(32768 * -0.002391875073164555),
+  (short)(32768 * -0.001236984700413469),
+  (short)(32768 * -0.001922560128827416),
+  (short)(32768 * -0.005356720327533458),
+  (short)(32768 * -0.012055656297010635),
+  (short)(32768 * -0.021882952959947619),
+  (short)(32768 * -0.033888748300090733),
+  (short)(32768 * -0.046312736456333638),
+  (short)(32768 * -0.056783367797647665),
+  (short)(32768 * -0.062699937453677912),
+  (short)(32768 * -0.061735375084135742),
+  (short)(32768 * -0.052358513976237808),
+  (short)(32768 * -0.034257179158167443),
+  (short)(32768 * -0.008554500746482946),
+  (short)(32768 * 0.022249911747384360),
+  (short)(32768 * 0.054622962942346594),
+  (short)(32768 * 0.084568844473140448),
+  (short)(32768 * 0.108316122839950818),
+  (short)(32768 * 0.122979341462627859),
+  (short)(32768 * 0.127056096658453188),
+  (short)(32768 * 0.120656295327679283),
+  (short)(32768 * 0.105420364259485699),
+  (short)(32768 * 0.084152608145489444),
+  (short)(32768 * 0.060257510644444748),
+  (short)(32768 * 0.037105711921879434),
+  (short)(32768 * 0.017464092086704748),
+  (short)(32768 * 0.003100559033325746),
+  (short)(32768 * -0.005373489802481697),
+  (short)(32768 * -0.008418211280310166),
+  (short)(32768 * -0.007286730644726664),
+  (short)(32768 * -0.003638388931163832),
+  (short)(32768 * 0.000858330713630433),
+  (short)(32768 * 0.004847436504682235),
+  (short)(32768 * 0.007476399317750315),
+  (short)(32768 * 0.008440227567663121),
+  (short)(32768 * 0.007898970420636600),
+  (short)(32768 * 0.006314366257036837),
+  (short)(32768 * 0.004261033495040515),
+  (short)(32768 * 0.002261843500794377),
+  (short)(32768 * 0.000680212977485724),
+  (short)(32768 * -0.000319493110301691),
+  (short)(32768 * -0.000751893569425181),
+  (short)(32768 * -0.000752248417868501),
+  (short)(32768 * -0.000505487955986662),
+  (short)(32768 * -0.000184645628631330),
+  (short)(32768 * 0.000087913008490067),
+  (short)(32768 * 0.000253106348867209),
+  (short)(32768 * 0.000306473486382603),
+  (short)(32768 * 0.000277637042003169),
+  (short)(32768 * 0.000207782317481292),
+  (short)(32768 * 0.000132446796990356),
+  (short)(32768 * 0.000072894261560354)
+
+
+  (short)(32768 * -0.000072894261560345),
+  (short)(32768 * -0.000132446796990344),
+  (short)(32768 * -0.000207782317481281),
+  (short)(32768 * -0.000277637042003168),
+  (short)(32768 * -0.000306473486382623),
+  (short)(32768 * -0.000253106348867259),
+  (short)(32768 * -0.000087913008490148),
+  (short)(32768 * 0.000184645628631233),
+  (short)(32768 * 0.000505487955986583),
+  (short)(32768 * 0.000752248417868491),
+  (short)(32768 * 0.000751893569425298),
+  (short)(32768 * 0.000319493110301983),
+  (short)(32768 * -0.000680212977485245),
+  (short)(32768 * -0.002261843500793748),
+  (short)(32768 * -0.004261033495039842),
+  (short)(32768 * -0.006314366257036280),
+  (short)(32768 * -0.007898970420636345),
+  (short)(32768 * -0.008440227567663343),
+  (short)(32768 * -0.007476399317751102),
+  (short)(32768 * -0.004847436504683540),
+  (short)(32768 * -0.000858330713632029),
+  (short)(32768 * 0.003638388931162351),
+  (short)(32768 * 0.007286730644725833),
+  (short)(32768 * 0.008418211280310565),
+  (short)(32768 * 0.005373489802483816),
+  (short)(32768 * -0.003100559033321630),
+  (short)(32768 * -0.017464092086698697),
+  (short)(32768 * -0.037105711921871905),
+  (short)(32768 * -0.060257510644436532),
+  (short)(32768 * -0.084152608145481672),
+  (short)(32768 * -0.105420364259479538),
+  (short)(32768 * -0.120656295327675800),
+  (short)(32768 * -0.127056096658453216),
+  (short)(32768 * -0.122979341462631633),
+  (short)(32768 * -0.108316122839958146),
+  (short)(32768 * -0.084568844473150454),
+  (short)(32768 * -0.054622962942358168),
+  (short)(32768 * -0.022249911747396132),
+  (short)(32768 * 0.008554500746472333),
+  (short)(32768 * 0.034257179158159054),
+  (short)(32768 * 0.052358513976232306),
+  (short)(32768 * 0.061735375084133286),
+  (short)(32768 * 0.062699937453678217),
+  (short)(32768 * 0.056783367797650072),
+  (short)(32768 * 0.046312736456337288),
+  (short)(32768 * 0.033888748300094730),
+  (short)(32768 * 0.021882952959951244),
+  (short)(32768 * 0.012055656297013388),
+  (short)(32768 * 0.005356720327535105),
+  (short)(32768 * 0.001922560128828006),
+  (short)(32768 * 0.001236984700413229),
+  (short)(32768 * 0.002391875073163812),
+  (short)(32768 * 0.004371955618154038),
+  (short)(32768 * 0.006296120449840938),
+  (short)(32768 * 0.007570802072162439),
+  (short)(32768 * 0.007940501940620253),
+  (short)(32768 * 0.007448193692118624),
+  (short)(32768 * 0.006337182914262643),
+  (short)(32768 * 0.004932965382553323),
+  (short)(32768 * 0.003539247773172483),
+  (short)(32768 * 0.002370114347025498),
+  (short)(32768 * 0.001525299390682370),
+  (short)(32768 * 0.001002372095321316),
+  (short)(32768 * 0.000731530748682004),
+  (short)(32768 * 0.000616670267768521),
+  (short)(32768 * 0.000569479602046963),
+  (short)(32768 * 0.000529324432676881),
+  (short)(32768 * 0.000468041804899765),
+  (short)(32768 * 0.000383511439791304),
+  (short)(32768 * 0.000287988910943362)
+
+
+85
+(short)( 32768 * 1.936360238116910E-6  ),
+(short)( 32768 * 8.596907941616230E-6  ),
+(short)( 32768 * 0.000021313539094513  ),
+(short)( 32768 * 0.000039922581007478  ),
+(short)( 32768 * 0.000063665037839926  ),
+(short)( 32768 * 0.000096588018442902  ),
+(short)( 32768 * 0.000151185079450219  ),
+(short)( 32768 * 0.000240048671089178  ),
+(short)( 32768 * 0.000355313244093721  ),
+(short)( 32768 * 0.000455480575306277  ),
+(short)( 32768 * 0.000487525618897985  ),
+(short)( 32768 * 0.000448429344559743  ),
+(short)( 32768 * 0.000441905673857701  ),
+(short)( 32768 * 0.000656436179838934  ),
+(short)( 32768 * 0.001228260442994080  ),
+(short)( 32768 * 0.002057747170786644  ),
+(short)( 32768 * 0.002744169021256951  ),
+(short)( 32768 * 0.002783365328971788  ),
+(short)( 32768 * 0.001991048270971564  ),
+(short)( 32768 * 0.000870152935399601  ),
+(short)( 32768 * 0.000543348954385515  ),
+(short)( 32768 * 0.002086895284405703  ),
+(short)( 32768 * 0.005571916961201433  ),
+(short)( 32768 * 0.009524166504366735  ),
+(short)( 32768 * 0.011460470244062732  ),
+(short)( 32768 * 0.009509885883912047  ),
+(short)( 32768 * 0.004211375504597140  ),
+(short)( 32768 *-0.000921851712276400  ),
+(short)( 32768 *-0.001000876711154889  ),
+(short)( 32768 * 0.006952244638533937  ),
+(short)( 32768 * 0.021004287244179118  ),
+(short)( 32768 * 0.034012187697005251  ),
+(short)( 32768 * 0.037165922099714394  ),
+(short)( 32768 * 0.026008149014849609  ),
+(short)( 32768 * 0.005368479982471630  ),
+(short)( 32768 *-0.010563366460562079  ),
+(short)( 32768 *-0.004422967169111801  ),
+(short)( 32768 * 0.034346004889288143  ),
+(short)( 32768 * 0.101161721542181893  ),
+(short)( 32768 * 0.175050839863564234  ),
+(short)( 32768 * 0.226418705484803112  ),
+(short)( 32768 * 0.230647590757408094  ),
+(short)( 32768 * 0.180578149437779611  ),
+(short)( 32768 * 0.091011367822764075  ),
+(short)( 32768 *-0.007523287528724512  ),
+(short)( 32768 *-0.082646532411566984  ),
+(short)( 32768 *-0.114415065769738644  ),
+(short)( 32768 *-0.102741450977249640  ),
+(short)( 32768 *-0.064695558637794720  ),
+(short)( 32768 *-0.024031568766843151  ),
+(short)( 32768 * 0.000838971257744977  ),
+(short)( 32768 * 0.004123979400998993  ),
+(short)( 32768 *-0.007737243216200090  ),
+(short)( 32768 *-0.022502153655438228  ),
+(short)( 32768 *-0.030011089016335601  ),
+(short)( 32768 *-0.027030298718197423  ),
+(short)( 32768 *-0.017135589787907100  ),
+(short)( 32768 *-0.006884134779572964  ),
+(short)( 32768 *-0.001323305572550949  ),
+(short)( 32768 *-0.001543570640730744  ),
+(short)( 32768 *-0.005147424323709140  ),
+(short)( 32768 *-0.008593379072179084  ),
+(short)( 32768 *-0.009543776366052220  ),
+(short)( 32768 *-0.007839810879186379  ),
+(short)( 32768 *-0.004919969493187661  ),
+(short)( 32768 *-0.002482037048876100  ),
+(short)( 32768 *-0.001413220860136188  ),
+(short)( 32768 *-0.001545100215161085  ),
+(short)( 32768 *-0.002116104245595165  ),
+(short)( 32768 *-0.002427342712861818  ),
+(short)( 32768 *-0.002226516476618989  ),
+(short)( 32768 *-0.001681043647118040  ),
+(short)( 32768 *-0.001107511122709350  ),
+(short)( 32768 *-0.000718246000668050  ),
+(short)( 32768 *-0.000537418783099531  ),
+(short)( 32768 *-0.000470701289670866  ),
+(short)( 32768 *-0.000418493599034147  ),
+(short)( 32768 *-0.000339467237498280  ),
+(short)( 32768 *-0.000244872331566725  ),
+(short)( 32768 *-0.000160562163030922  ),
+(short)( 32768 *-0.000099429006230605  ),
+(short)( 32768 *-0.000058841179210850  ),
+(short)( 32768 *-0.000031458009497279  ),
+(short)( 32768 *-0.000013170642801227  ),
+(short)( 32768 *-3.004924640076950E-6  )  
+
+
+
+ (short)( 32768 * -3.004924640077050E-6  ),
+(short)( 32768 *-0.000013170642801227  ),
+(short)( 32768 *-0.000031458009497278  ),
+(short)( 32768 *-0.000058841179210850  ),
+(short)( 32768 *-0.000099429006230612  ),
+(short)( 32768 *-0.000160562163030940  ),
+(short)( 32768 *-0.000244872331566747  ),
+(short)( 32768 *-0.000339467237498281  ),
+(short)( 32768 *-0.000418493599034105  ),
+(short)( 32768 *-0.000470701289670803  ),
+(short)( 32768 *-0.000537418783099538  ),
+(short)( 32768 *-0.000718246000668246  ),
+(short)( 32768 *-0.001107511122709762  ),
+(short)( 32768 *-0.001681043647118495  ),
+(short)( 32768 *-0.002226516476619129  ),
+(short)( 32768 *-0.002427342712861341  ),
+(short)( 32768 *-0.002116104245594171  ),
+(short)( 32768 *-0.001545100215160246  ),
+(short)( 32768 *-0.001413220860136486  ),
+(short)( 32768 *-0.002482037048878108  ),
+(short)( 32768 *-0.004919969493190803  ),
+(short)( 32768 *-0.007839810879188832  ),
+(short)( 32768 *-0.009543776366051852  ),
+(short)( 32768 *-0.008593379072175104  ),
+(short)( 32768 *-0.005147424323703379  ),
+(short)( 32768 *-0.001543570640727314  ),
+(short)( 32768 *-0.001323305572553909  ),
+(short)( 32768 *-0.006884134779583109  ),
+(short)( 32768 *-0.017135589787920066  ),
+(short)( 32768 *-0.027030298718205129  ),
+(short)( 32768 *-0.030011089016331063  ),
+(short)( 32768 *-0.022502153655421273  ),
+(short)( 32768 *-0.007737243216180045  ),
+(short)( 32768 * 0.004123979401006588  ),
+(short)( 32768 * 0.000838971257727133  ),
+(short)( 32768 *-0.024031568766887061  ),
+(short)( 32768 *-0.064695558637848288  ),
+(short)( 32768 *-0.102741450977284071  ),
+(short)( 32768 *-0.114415065769726015  ),
+(short)( 32768 *-0.082646532411495471  ),
+(short)( 32768 *-0.007523287528607515  ),
+(short)( 32768 * 0.091011367822891140  ),
+(short)( 32768 * 0.180578149437874147  ),
+(short)( 32768 * 0.230647590757439319  ),
+(short)( 32768 * 0.226418705484765947  ),
+(short)( 32768 * 0.175050839863480301  ),
+(short)( 32768 * 0.101161721542088010  ),
+(short)( 32768 * 0.034346004889218650  ),
+(short)( 32768 *-0.004422967169139688  ),
+(short)( 32768 *-0.010563366460552682  ),
+(short)( 32768 * 0.005368479982499039  ),
+(short)( 32768 * 0.026008149014873309  ),
+(short)( 32768 * 0.037165922099721326  ),
+(short)( 32768 * 0.034012187696995183  ),
+(short)( 32768 * 0.021004287244161254  ),
+(short)( 32768 * 0.006952244638519390  ),
+(short)( 32768 *-0.001000876711159727  ),
+(short)( 32768 *-0.000921851712272130  ),
+(short)( 32768 * 0.004211375504605129  ),
+(short)( 32768 * 0.009509885883917896  ),
+(short)( 32768 * 0.011460470244063530  ),
+(short)( 32768 * 0.009524166504363295  ),
+(short)( 32768 * 0.005571916961196730  ),
+(short)( 32768 * 0.002086895284402516  ),
+(short)( 32768 * 0.000543348954384910  ),
+(short)( 32768 * 0.000870152935400873  ),
+(short)( 32768 * 0.001991048270973229  ),
+(short)( 32768 * 0.002783365328972698  ),
+(short)( 32768 * 0.002744169021256828  ),
+(short)( 32768 * 0.002057747170785915  ),
+(short)( 32768 * 0.001228260442993352  ),
+(short)( 32768 * 0.000656436179838569  ),
+(short)( 32768 * 0.000441905673857703  ),
+(short)( 32768 * 0.000448429344559912  ),
+(short)( 32768 * 0.000487525618898127  ),
+(short)( 32768 * 0.000455480575306319  ),
+(short)( 32768 * 0.000355313244093691  ),
+(short)( 32768 * 0.000240048671089135  ),
+(short)( 32768 * 0.000151185079450196  ),
+(short)( 32768 * 0.000096588018442900  ),
+(short)( 32768 * 0.000063665037839931  ),
+(short)( 32768 * 0.000039922581007480  ),
+(short)( 32768 * 0.000021313539094513  ),
+(short)( 32768 * 8.596907941615600E-6  ),
+(short)( 32768 * 1.936360238116770E-6  )
+
  */
