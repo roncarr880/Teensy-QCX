@@ -1,2 +1,2 @@
 # Teensy-QCX 
-Status:   Just getting started.
+Status:   Starting to be useful.
