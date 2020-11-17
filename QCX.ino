@@ -1,6 +1,6 @@
 /*
  *   QCX with Teensy 3.6, Audio shield, and ILI9341 touchscreen added on QCX Dev Board.
- *   Building upon ZL2CTM inspired code.
+ *   Building upon ZL2CTM type design.
  * 
      
    Free pins when using audio board and display.
@@ -12,14 +12,19 @@
   4
   5
   8      used for touch CS
- 16      A2
- 17      A3
+ 16      A2  QCX audio
+ 17      A3  free but can't use analog read when audio library reads ADC
 
 
  Considering: re-sample qcx audio and lineout audio and using DAC0 to pass audio
  to the top of the volume control.  This will allow software selection of the
  output as well as access to audio data for decoders. The qcx audio can be provided
  with AGC and/or clipping/filter for hearing protection.
+
+ Current plan is to bring QCX audio into the Audio design on the SSB selection mux.  Sampled
+ at the J__  just before the volume control.  The SDR audio will go to the volume control instead.
+ The TX signal to external amplifier can be sampled to see when TX is active and the sidetone can
+ be picked up by switching the selection mux to QCX audio.  AGC can be provided.
 
  *******************************************************************************/
 
@@ -34,9 +39,47 @@
 
 
 // GUItool: begin automatically generated code
+AudioInputI2S            IQ_in;           //xy=55,254
+AudioInputAnalog         QCXaudio;           //xy=167.14288330078125,417.14288330078125
+AudioFilterFIR           H45minus;           //xy=168,338
+AudioFilterFIR           H45plus;           //xy=169,175
+//AudioAnalyzeFFT256       LSBscope;       //xy=349,445
+AudioMixer4              LSBmixer;         //xy=352,328
+AudioMixer4              USBmixer;         //xy=355,181
+//AudioAnalyzeFFT256       USBscope;       //xy=356,63
+//AudioAnalyzePeak         peak1;          //xy=485.55556869506836,107.77777481079102
+AudioMixer4              SSBselect;         //xy=512.5,255.99996948242188
+AudioFilterFIR           IF12r7;           //xy=603.8570938110352,446.8571033477783
+//AudioAnalyzeRMS          rms1;           //xy=615.5555839538574,139.99999809265137
+AudioFilterBiquad        BandWidth;        //xy=683.7499389648438,256.25
+AudioEffectRectifier     AMdet;       //xy=753.7143096923828,445.42854022979736
+AudioOutputI2S           LineOut;           //xy=861.9443359375,344.7500305175781
+AudioConnection          patchCord1(IQ_in, 0, H45plus, 0);
+AudioConnection          patchCord2(IQ_in, 1, H45minus, 0);
+AudioConnection          patchCord3(QCXaudio, 0, SSBselect, 0);
+AudioConnection          patchCord4(H45minus, 0, USBmixer, 2);
+AudioConnection          patchCord5(H45minus, 0, LSBmixer, 2);
+AudioConnection          patchCord6(H45plus, 0, USBmixer, 1);
+AudioConnection          patchCord7(H45plus, 0, LSBmixer, 1);
+//AudioConnection          patchCord8(LSBmixer, LSBscope);
+AudioConnection          patchCord9(LSBmixer, 0, SSBselect, 2);
+//AudioConnection          patchCord10(USBmixer, USBscope);
+AudioConnection          patchCord11(USBmixer, 0, SSBselect, 1);
+//AudioConnection          patchCord12(USBmixer, peak1);
+AudioConnection          patchCord13(USBmixer, IF12r7);
+AudioConnection          patchCord14(SSBselect, BandWidth);
+AudioConnection          patchCord15(IF12r7, AMdet);
+//AudioConnection          patchCord16(BandWidth, rms1);
+AudioConnection          patchCord17(BandWidth, 0, LineOut, 0);
+AudioConnection          patchCord18(BandWidth, 0, LineOut, 1);
+AudioConnection          patchCord19(AMdet, 0, SSBselect, 3);
+AudioControlSGTL5000     codec;     //xy=86,63
+// GUItool: end automatically generated code
+
+/*
+// GUItool: begin automatically generated code
 // IIR bandwidth filter version.
-// FIR constants are picked up in reverse order, so may have to switch H45plus and H45minus
-// as they seem to have the same constants, just reverse order.
+// GUItool: begin automatically generated code
 AudioInputI2S            LineIn;           //xy=55,254
 AudioFilterFIR           H45minus;           //xy=168,338
 AudioFilterFIR           H45plus;           //xy=169,175
@@ -44,11 +87,13 @@ AudioFilterFIR           H45plus;           //xy=169,175
 AudioMixer4              LSBmixer;         //xy=352,328
 AudioMixer4              USBmixer;         //xy=355,181
 //AudioAnalyzeFFT256       USBscope;       //xy=356,63
-AudioMixer4              SSBselect;         //xy=455,256
 //AudioAnalyzePeak         peak1;          //xy=485.55556869506836,107.77777481079102
+AudioMixer4              SSBselect;         //xy=512.5,255.99996948242188
+AudioFilterFIR           IF12r7;           //xy=551,444
 //AudioAnalyzeRMS          rms1;           //xy=615.5555839538574,139.99999809265137
-AudioOutputI2S           LineOut;           //xy=619.4443702697754,391.0000190734863
-AudioFilterBiquad        BandWidth;        //xy=645,255
+AudioFilterBiquad        BandWidth;        //xy=683.7499389648438,256.25
+AudioEffectRectifier     AMdet;       //xy=708,444
+AudioOutputI2S           LineOut;           //xy=861.9443359375,344.7500305175781
 AudioConnection          patchCord1(LineIn, 0, H45plus, 0);
 AudioConnection          patchCord2(LineIn, 1, H45minus, 0);
 AudioConnection          patchCord3(H45minus, 0, USBmixer, 2);
@@ -60,12 +105,16 @@ AudioConnection          patchCord8(LSBmixer, 0, SSBselect, 2);
 //AudioConnection          patchCord9(USBmixer, USBscope);
 AudioConnection          patchCord10(USBmixer, 0, SSBselect, 1);
 //AudioConnection          patchCord11(USBmixer, peak1);
-AudioConnection          patchCord12(SSBselect, BandWidth);
-//AudioConnection          patchCord13(BandWidth, rms1);
-AudioConnection          patchCord14(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord15(BandWidth, 0, LineOut, 1);
+AudioConnection          patchCord12(USBmixer, IF12r7);
+AudioConnection          patchCord13(SSBselect, BandWidth);
+AudioConnection          patchCord14(IF12r7, AMdet);
+//AudioConnection          patchCord15(BandWidth, rms1);
+AudioConnection          patchCord16(BandWidth, 0, LineOut, 0);
+AudioConnection          patchCord17(BandWidth, 0, LineOut, 1);
+AudioConnection          patchCord18(AMdet, 0, SSBselect, 3);
 AudioControlSGTL5000     codec;     //xy=86,63
 // GUItool: end automatically generated code
+*/
 
 
 
@@ -101,15 +150,18 @@ XPT2046_Touchscreen ts(CS_PIN);
 #define cat Serial1
 
 // radio defines for vfo_mode.
-#define VFO_A  0
-#define VFO_B  1
-#define VFO_SPLIT 2
-#define VFO_RIT   4
-#define VFO_UNUSED 8
+#define VFO_A  1
+#define VFO_B  2
+#define VFO_SPLIT 4
+#define VFO_RIT   8
+#define VFO_CW    16
+#define VFO_LSB   32
+#define VFO_USB   64
+#define VFO_AM   128
 
 //  radio variables
 int32_t  vfo_a, vfo_b, rit, stp = 100, rit_stp = 10;
-uint8_t  vfo_mode = VFO_UNUSED;    // set to invalid value so prints status line on startup
+uint8_t  vfo_mode;           // undefined, should pick up value on init
 
 // cat polling
 #define QUFA 0b00000001
@@ -157,41 +209,42 @@ struct menu {
 };
 
 // mode menu items
-char m_qcx[] = " OFF";    // native qcx mode using hardware decode, built in filter, no agc
-char m_cw[]  = " CW 400";
+char m_qcx[] = " CW QCX";          // qcx audio sampled on A2 via audio library
+char m_cw[]  = " CW sdr";
 char m_lsb[] = " LSB";
 char m_usb[] = " USB";
 char m_am[]  = " AM";
-char m_sam[] = " SAM";
-char m_data[]= " DATA";
+char m_sam[] = " ";
+char m_data[]= " ";
 
 struct menu mode_menu_data = {
    { "SDR Mode" },
    { m_qcx,m_cw,m_lsb,m_usb,m_am,m_sam,m_data },
-   {0,2,1,2,-1,-1,-1,-1},
+   {0,1,2,3,4,-1,-1,-1},
    48,
    ILI9341_PURPLE,
    2
 };
 
-char w_am[] =     " AM 3900";
-char w_bypass[] = " AM Wide";
-char w_2500[] =   " 2500";
-char w_2700[] =   " 2700";
-char w_2900[] =   " 2900";
-char w_3100[] =   " 3100";
+char w_6k[] =     " 6000";     // set actual filters wider than their names as have
+char w_4k[] =     " 4500";     // 4 IIR filters cascaded.  12db down at cutoff?
+char w_3600[] =   " 3600";
 char w_3300[] =   " 3300";
-char w_data[] =   " DATA";
+char w_3000[] =   " 3000";
+char w_2700[] =   " 2700";
+char w_2400[] =   " 2400";
+char w_1100[] =   " 1100";
 struct menu band_width_menu_data = {
    { "Band Width" },
-   { w_am, w_bypass, w_2500, w_2700, w_2900, w_3100, w_3300, w_data },
-   { 5000, 10000, 3200, 3400, 3600, 3800, 4000, 2100 },      // set wider, 12 db down point?
+   { w_6k, w_4k,  w_3600, w_3300, w_3000, w_2700, w_2400, w_1100 },
+   { 6000+500, 4500+500, 3600+500, 3300+500, 3000+400, 2700+300, 2400+200, 1100+100 },
    48,
    ILI9341_MAROON,
-   6
+   2
 };
 
-
+int mode_mux_selection;    // save current audio path so can switch to sidetone during TX.
+int rx_tx_state;           // save current RX TX so can act only when it changes
 
 /********************************************************************************/
 
@@ -221,6 +274,7 @@ int i,j,r,g,b;
   ts.setRotation(1);
  
   menu_dispatch = &hidden_menu;     // function pointer for screen touch
+  vfo_mode = VFO_LSB;                
 
    // Setup the audio shield
   AudioNoInterrupts();
@@ -232,26 +286,30 @@ int i,j,r,g,b;
   codec.lineInLevel(12);                    // 0 to 15  !!! use as attenuator, reduce gain on loud signals
   codec.lineOutLevel(20);                   // 13 to 31 with 13 the loudest.  Use to balance gain with
                                             // the QCX signal level.  One time adjustment.
-  // dacVolume  ? does it effect lineout or just headphones
-  // autoVolume ? Built in AGC.  Is it input or output feature?
+ 
  // H45plus.begin(h45p,HILBERT_SIZE);
  // H45minus.begin(h45m,HILBERT_SIZE);
   H45plus.begin(h90p,HILBERT_SIZE);        // try the 90deg and 0deg phase shift filters
-  H45minus.begin(h00m,HILBERT_SIZE);
+  H45minus.begin(h00m,HILBERT_SIZE);       // Maybe just a little bit better
   USBmixer.gain(1,1.0);                    // add signals get USB.   Lower gain if addition causes clipping.
   USBmixer.gain(2,1.0);
   LSBmixer.gain(1,1.0);                    // sub signals get LSB
   LSBmixer.gain(2,-1.0);
 
+  SSBselect.gain(0,0.0);                   // turn off QCX native audio
   SSBselect.gain(1,0.0);                   // turn off USB
   SSBselect.gain(2,1.0);                   // LSB is default on startup
+  SSBselect.gain(3,0.0);                   // turn off AM audio
+  mode_mux_selection = 2;                  // LSB
 
-  BandWidth.setLowpass(0,4000,0.7);        // do all of these need to be configured?
-  BandWidth.setLowpass(1,4000,0.7);
-  BandWidth.setLowpass(2,4000,0.7);
-  BandWidth.setLowpass(3,4000,0.7);        // 12 db down at 4000 now?
-    
+  BandWidth.setLowpass(0,4100,0.7);
+  BandWidth.setLowpass(1,4100,0.7);
+  BandWidth.setLowpass(2,4100,0.7);
+  BandWidth.setLowpass(3,4100,0.7);        // 4 IIR lowpass cascade, 12 db down at 4100 now?
+
+  IF12r7.begin(AM12r7fir,30);              // AM filter at 12.7k audio IF frequency
   AudioInterrupts();
+
   
 }
 
@@ -260,21 +318,24 @@ int i,j,r,g,b;
 // touch the screen top,middle,bottom to bring up different menus.  Assign menu_dispatch.
 // This is default touch processing.   No menu on the screen.
 void hidden_menu( int32_t t ){
+int32_t  yt, xt;
+
 
    screen_owner = MENUS;
+   yt = t & 0xff;
+   xt = t >> 8;
    
-   // just check the y value of touch to see what menu 
-   t = t & 0xff;
-   if( t < 60 ){
+   // check the y value of touch to see what menu area
+   if( yt < 60 ){
       menu_display( &mode_menu_data );
       menu_dispatch = &mode_menu;        // screen touch goes to mode_menu() now
    }
-   else if ( t < 140 ){ 
+   else if ( yt < 140 ){ 
       menu_display( &band_width_menu_data );
       menu_dispatch = &band_width_menu;
    }
-   
-   else screen_owner = DECODE;           // screen area not defined 
+   // else if()                          // other options !!! hot spot lower right corner for TX
+   else menu_cleanup();                  // not active part of the screen, return to normal op.
 }
 
 void mode_menu( int32_t t ){
@@ -284,22 +345,50 @@ int selection;
    if( mode_menu_data.param[selection] != -1 ){
       mode_menu_data.current = selection;
       selection = mode_menu_data.param[selection];
-      // selection 0 is a special case.  Disable SDR and enable QCX.
-      if( selection == 0 ){
-         // !!! enable the QCX audio
-      }
-      else{
-        if( selection == 1 ){
-            SSBselect.gain(1,0.0);                   // turn on LSB
-            SSBselect.gain(2,1.0);
-        }
-        if( selection == 2 ){
-            SSBselect.gain(1,1.0);                   // turn on USB
-            SSBselect.gain(2,0.0);  
-        }
-      }
-   }
 
+      // !!! eventually gain will need to be AGC controlled
+
+      vfo_mode &= 0x0f;        // save the qcx mode flags, clear the sdr mode flags
+      switch( selection ){
+        case 0:     // QCX audio selected
+                 vfo_mode |= VFO_CW;
+                 SSBselect.gain(0,0.5);                   // select QCX audio                 
+                 SSBselect.gain(1,0.0);                   // mute LSB,USB,AM
+                 SSBselect.gain(2,0.0);
+                 SSBselect.gain(3,0.0);
+                 mode_mux_selected = 0;
+        break;
+        case 1:  vfo_mode |= VFO_CW;
+                 SSBselect.gain(0,0.0);                 
+                 SSBselect.gain(1,1.0);                   // turn on USB
+                 SSBselect.gain(2,0.0);
+                 SSBselect.gain(3,0.0);
+                 mode_mux_selected = 1;
+        break;
+        case 2:  vfo_mode |= VFO_LSB;  
+                 SSBselect.gain(0,0.0);                 
+                 SSBselect.gain(1,0.0);
+                 SSBselect.gain(2,1.0);                   // turn on LSB
+                 SSBselect.gain(3,0.0);
+                 mode_mux_selected = 2;
+        break;
+        case 3:  vfo_mode |= VFO_USB;
+                 SSBselect.gain(0,0.0);
+                 SSBselect.gain(1,1.0);                   // turn on USB
+                 SSBselect.gain(2,0.0);
+                 SSBselect.gain(3,0.0);
+                 mode_mux_selected = 1;
+        break;
+        case 4:  vfo_mode |= VFO_AM;
+                 SSBselect.gain(0,0.0);
+                 SSBselect.gain(1,0.0);
+                 SSBselect.gain(2,0.0);
+                 SSBselect.gain(3,1.0);                   // turn on AM
+                 mode_mux_selected = 3;
+        break;                      
+      }
+     
+   }
    menu_cleanup(); 
 }
 
@@ -321,10 +410,10 @@ int sel;
       band_width_menu_data.current = sel;
       sel = band_width_menu_data.param[sel];
      //Serial.println(sel);
-      BandWidth.setLowpass(0,sel,0.7);        // do all of these need to be configured?
+      BandWidth.setLowpass(0,sel,0.7);
       BandWidth.setLowpass(1,sel,0.7);
       BandWidth.setLowpass(2,sel,0.7);
-      BandWidth.setLowpass(3,sel,0.7);        // 12 db down at 4000 now?
+      BandWidth.setLowpass(3,sel,0.7);
    }
    
    menu_cleanup();
@@ -367,7 +456,7 @@ int32_t x,y;
 
    y = t & 0xff;
    x = t >> 8;
-   y -= y_size;    // top row is the title
+   y -= y_size;    // top row is the title  !!! if sub menus needed, need to decode title touch also
    y /= y_size;    // row of the touch
    x /= 160;       // column 
    return 2*y + x; // two menu items per row
@@ -487,14 +576,20 @@ static uint8_t   z;
 
 void vfo_mode_disp(){
 int a,b,s,r;
-// int pos;
+int u,l,c,m;
 
    if( screen_owner != DECODE ) return;
    a = b = s = r = 0;                       // set colors of the vfo mode
+   c = u = l = m = 0;
+   
    if( vfo_mode & VFO_B ) b = 10;
-   else a = 10;
+   if( vfo_mode & VFO_A ) a = 10;
    if( vfo_mode & VFO_SPLIT ) s = 10;
    if( vfo_mode & VFO_RIT ) r = 10;
+   if( vfo_mode & VFO_CW ) c = 10;
+   if( vfo_mode & VFO_LSB ) l = 10;
+   if( vfo_mode & VFO_USB ) u = 10;
+   if( vfo_mode & VFO_AM )  m = 10;
    
    tft.setTextSize(1);
    tft.setTextColor(EGA[4+a],0);
@@ -510,23 +605,27 @@ int a,b,s,r;
    tft.print("Split");
 
    tft.setCursor(150,2);
+   tft.setTextColor(EGA[4+c],0);
    tft.print("CW");
 
    tft.setCursor(175,2);
+   tft.setTextColor(EGA[4+u],0);
    tft.print("USB");
 
    tft.setCursor(205,2);
+   tft.setTextColor(EGA[4+l],0);
    tft.print("LSB");
 
    tft.setCursor(235,2);
+   tft.setTextColor(EGA[4+m],0);
    tft.print("AM");
    
    tft.setCursor(280,2);
    tft.setTextColor(EGA[4+r],0);
    tft.print("RIT");
     
-   tft.drawLine(0,60,640,60,EGA[4]);
-   tft.drawLine(0,61,640,61,EGA[4]);
+   tft.drawLine(0,61,640,60,EGA[4]);
+   tft.drawLine(0,62,640,61,EGA[4]);
    
        //  underline active tuning digit with best guess at step
     /*   
@@ -574,7 +673,8 @@ int i,mult;
    if( vfo_mode & VFO_B ) vfo = vfo_b;
    else vfo = vfo_a;
 
-   if( 1 ) vfo -= 700;   // !!! cw mode flag needed
+   if( (vfo_mode & VFO_AM ) == VFO_AM ) vfo += 13000;   // AM IF is 12.7 but sound better 1k low
+   if( (vfo_mode & VFO_CW ) == 0 ) vfo -= 700;
    
    // 40 meter radio, ignore 10 meg digit for now
    mult = 1000000;
@@ -848,8 +948,9 @@ int32_t temp2;
 
    if( strlen(response) < 35 ) return;
     // build new vfo_mode bits
-   temp = 0;
+   temp = vfo_mode & 0xf0;
    if( response[30] == '1' ) temp |= VFO_B;
+   else temp |= VFO_A;
    if( response[32] == '1' ) temp |= VFO_SPLIT;
    if( response[23] == '1' ) temp |= VFO_RIT;    
    if( temp != vfo_mode ){                    // compare to displayed value, avoid duplicate screen update
