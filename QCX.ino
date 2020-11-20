@@ -1,6 +1,5 @@
 /*
  *   QCX with Teensy 3.6, Audio shield, and ILI9341 touchscreen added on QCX Dev Board.
- *   Building upon ZL2CTM type design.
  * 
      
    Free pins when using audio board and display.
@@ -37,23 +36,33 @@
 
 #include "hilbert.h"
 
+// !!! think about cutting Vusb at some point and if want permanent features of USB cat control
+// and USB audio will need access to usb on Teensy to use.
+// #define USE_USB_AUDIO        // think not needed for self contained radio but works really slick
+                             // with HDSDR.
 
 // GUItool: begin automatically generated code
+// this version added QCXaudio and picks up normal I and Q
 AudioInputI2S            IQ_in;           //xy=55,254
 AudioInputAnalog         QCXaudio;           //xy=167.14288330078125,417.14288330078125
 AudioFilterFIR           H45minus;           //xy=168,338
 AudioFilterFIR           H45plus;           //xy=169,175
-//AudioAnalyzeFFT256       LSBscope;       //xy=349,445
+AudioAnalyzeFFT256       LSBscope;       //xy=349,445
 AudioMixer4              LSBmixer;         //xy=352,328
 AudioMixer4              USBmixer;         //xy=355,181
-//AudioAnalyzeFFT256       USBscope;       //xy=356,63
-//AudioAnalyzePeak         peak1;          //xy=485.55556869506836,107.77777481079102
+AudioAnalyzeFFT256       USBscope;       //xy=356,63
+AudioAnalyzePeak         peak1;          //xy=485.55556869506836,107.77777481079102
 AudioMixer4              SSBselect;         //xy=512.5,255.99996948242188
 AudioFilterFIR           IF12r7;           //xy=603.8570938110352,446.8571033477783
-//AudioAnalyzeRMS          rms1;           //xy=615.5555839538574,139.99999809265137
+AudioAnalyzeRMS          rms1;           //xy=615.5555839538574,139.99999809265137
 AudioFilterBiquad        BandWidth;        //xy=683.7499389648438,256.25
 AudioEffectRectifier     AMdet;       //xy=753.7143096923828,445.42854022979736
 AudioOutputI2S           LineOut;           //xy=861.9443359375,344.7500305175781
+#ifdef USE_USB_AUDIO
+  AudioOutputUSB           usb1; 
+  AudioConnection          patchCord20(IQ_in, 0, usb1, 0);
+  AudioConnection          patchCord21(IQ_in, 1, usb1, 1);
+#endif
 AudioConnection          patchCord1(IQ_in, 0, H45plus, 0);
 AudioConnection          patchCord2(IQ_in, 1, H45minus, 0);
 AudioConnection          patchCord3(QCXaudio, 0, SSBselect, 0);
@@ -61,79 +70,47 @@ AudioConnection          patchCord4(H45minus, 0, USBmixer, 2);
 AudioConnection          patchCord5(H45minus, 0, LSBmixer, 2);
 AudioConnection          patchCord6(H45plus, 0, USBmixer, 1);
 AudioConnection          patchCord7(H45plus, 0, LSBmixer, 1);
-//AudioConnection          patchCord8(LSBmixer, LSBscope);
+AudioConnection          patchCord8(LSBmixer, LSBscope);
 AudioConnection          patchCord9(LSBmixer, 0, SSBselect, 2);
-//AudioConnection          patchCord10(USBmixer, USBscope);
+AudioConnection          patchCord10(USBmixer, USBscope);
 AudioConnection          patchCord11(USBmixer, 0, SSBselect, 1);
-//AudioConnection          patchCord12(USBmixer, peak1);
+AudioConnection          patchCord12(USBmixer, peak1);
 AudioConnection          patchCord13(USBmixer, IF12r7);
 AudioConnection          patchCord14(SSBselect, BandWidth);
 AudioConnection          patchCord15(IF12r7, AMdet);
-//AudioConnection          patchCord16(BandWidth, rms1);
+AudioConnection          patchCord16(BandWidth, rms1);
 AudioConnection          patchCord17(BandWidth, 0, LineOut, 0);
 AudioConnection          patchCord18(BandWidth, 0, LineOut, 1);
 AudioConnection          patchCord19(AMdet, 0, SSBselect, 3);
+
 AudioControlSGTL5000     codec;     //xy=86,63
 // GUItool: end automatically generated code
 
-/*
-// GUItool: begin automatically generated code
-// IIR bandwidth filter version.
-// GUItool: begin automatically generated code
-AudioInputI2S            LineIn;           //xy=55,254
-AudioFilterFIR           H45minus;           //xy=168,338
-AudioFilterFIR           H45plus;           //xy=169,175
-//AudioAnalyzeFFT256       LSBscope;       //xy=349,445
-AudioMixer4              LSBmixer;         //xy=352,328
-AudioMixer4              USBmixer;         //xy=355,181
-//AudioAnalyzeFFT256       USBscope;       //xy=356,63
-//AudioAnalyzePeak         peak1;          //xy=485.55556869506836,107.77777481079102
-AudioMixer4              SSBselect;         //xy=512.5,255.99996948242188
-AudioFilterFIR           IF12r7;           //xy=551,444
-//AudioAnalyzeRMS          rms1;           //xy=615.5555839538574,139.99999809265137
-AudioFilterBiquad        BandWidth;        //xy=683.7499389648438,256.25
-AudioEffectRectifier     AMdet;       //xy=708,444
-AudioOutputI2S           LineOut;           //xy=861.9443359375,344.7500305175781
-AudioConnection          patchCord1(LineIn, 0, H45plus, 0);
-AudioConnection          patchCord2(LineIn, 1, H45minus, 0);
-AudioConnection          patchCord3(H45minus, 0, USBmixer, 2);
-AudioConnection          patchCord4(H45minus, 0, LSBmixer, 2);
-AudioConnection          patchCord5(H45plus, 0, USBmixer, 1);
-AudioConnection          patchCord6(H45plus, 0, LSBmixer, 1);
-//AudioConnection          patchCord7(LSBmixer, LSBscope);
-AudioConnection          patchCord8(LSBmixer, 0, SSBselect, 2);
-//AudioConnection          patchCord9(USBmixer, USBscope);
-AudioConnection          patchCord10(USBmixer, 0, SSBselect, 1);
-//AudioConnection          patchCord11(USBmixer, peak1);
-AudioConnection          patchCord12(USBmixer, IF12r7);
-AudioConnection          patchCord13(SSBselect, BandWidth);
-AudioConnection          patchCord14(IF12r7, AMdet);
-//AudioConnection          patchCord15(BandWidth, rms1);
-AudioConnection          patchCord16(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord17(BandWidth, 0, LineOut, 1);
-AudioConnection          patchCord18(AMdet, 0, SSBselect, 3);
-AudioControlSGTL5000     codec;     //xy=86,63
-// GUItool: end automatically generated code
-*/
 
 
-
+// we have 65k colors.  How to pick one? Limit to just 16.
          //  4bpp pallett  0-3, 4-7, 8-11, 12-15
 const uint16_t EGA[] = { 
-         ILI9341_BLACK,    ILI9341_NAVY,    ILI9341_DARKGREEN, ILI9341_DARKCYAN,  \
-         ILI9341_MAROON,   ILI9341_PURPLE,  ILI9341_OLIVE,     ILI9341_LIGHTGREY, \
-         ILI9341_DARKGREY, ILI9341_BLUE,    ILI9341_GREEN,     ILI9341_CYAN,      \
-         ILI9341_RED,      ILI9341_MAGENTA, ILI9341_YELLOW,    ILI9341_WHITE      \
+         ILI9341_BLACK,    ILI9341_NAVY,    ILI9341_DARKGREEN, ILI9341_DARKCYAN,
+         ILI9341_MAROON,   ILI9341_PURPLE,  ILI9341_OLIVE,     ILI9341_LIGHTGREY,
+         ILI9341_DARKGREY, ILI9341_BLUE,    ILI9341_GREEN,     ILI9341_CYAN,
+         ILI9341_RED,      ILI9341_MAGENTA, ILI9341_YELLOW,    ILI9341_WHITE
          }; 
 uint16_t GRAY[16];
+
+// waterfall pallet, try just sliding bits
+//const uint16_t WF[] = {
+//         0b0000000000000000, 0b0000000000000001,0b0000000000000011,0b0000000000000111,
+//         0b0000000000001111, 0b0000000000011111,0b0000000000111111,0b0000000001111111,
+//         0b0000000011111111, 0b0000000111111111,0b0000001111111111,0b0000011111111111,
+//         0b0000111111111111, 0b0001111111111111,0b0011111111111111,0b0111111111111111,          
+//         };
 const uint16_t WF[] = {
-         0b0, 0b11, 0b111, 0b1100, 0b10010, \
-         0b11001, 0b111111, 0b111111100, 0b11101111111100, 0b111101111111000,  \
-         0b1100011100010000,  0b1110011100000000, \
-         0b1111101111100000, 0b1111101000001000, 0b1111110000110000, 0xffff  \
+         0b0000000000000000, 0b0000000000000001,0b0000000000000011,0b0000000000000111,
+         0b0000000000011111, 0b0000000001111110,0b0000000111111000,0b0000011111100000,
+         0b1111110000000000, 0b1111111000000000,0b1111111100000000,0b1111111110000000,
+         0b1111111111000000, 0b1111111111110000,0b1111111111111100,0b1111111111111111,          
          };
-
-
 
 // alternate display connections for use with audio board
 #define CS_PIN  8       // touchscreen
@@ -168,7 +145,7 @@ uint8_t  vfo_mode;           // undefined, should pick up value on init
 #define QUFB 0b00000010
 #define QUIF 0b00101100
 #define QUTB 0b01000000
-uint32_t cmd_tm;           // command interval timer
+uint32_t cmd_tm;              // command interval timer
 uint8_t qu_flags;
 
 // cw decode
@@ -177,7 +154,7 @@ uint8_t qu_flags;
 #define D_BOTTOM 238            // 
 #define D_SIZE   20             // line spacing
 char dtext[DECODE_LINES][26];   // buffer
-int dline = DECODE_LINES - 1;   // current working line
+int dline = DECODE_LINES - 1;   // current working line bottom of the screen
 int dpos;                       // current cursor position
 
 // screen owners
@@ -186,22 +163,21 @@ int dpos;                       // current cursor position
 #define MENUS    2
 uint8_t  screen_owner = DECODE;
 
-char kb[5][10] = { \
-   { '1','2','3','4','5','6','7','8','9','0' }, \
-   { 'Q','W','E','R','T','Y','U','I','O','P' }, \
-   { 'A','S','D','F','G','H','J','K','L', 8 }, \
-   { 'Z','X','C','V','B','N','M',',','.','/' }, \
-   { '*','*',' ',' ','?','=',' ',' ',' ',' ' }  \
+char kb[5][10] = {
+   { '1','2','3','4','5','6','7','8','9','0' },
+   { 'Q','W','E','R','T','Y','U','I','O','P' },
+   { 'A','S','D','F','G','H','J','K','L', 8 },      // 8 is backspace char
+   { 'Z','X','C','V','B','N','M',',','.','/' },
+   { '*','*',' ',' ','?','=',' ',' ',' ',' ' }
 };
 
 // Menu's
 
 void (* menu_dispatch )( int32_t );    // pointer to function that is processing screen touches
 
-
 struct menu {
    char title[16];
-   char *menu_item[8];
+   const char *menu_item[8];
    int param[8];
    int y_size;                  // x size will be half the screen, two items on a line for now
    int color;
@@ -209,13 +185,13 @@ struct menu {
 };
 
 // mode menu items
-char m_qcx[] = " CW QCX";          // qcx audio sampled on A2 via audio library
-char m_cw[]  = " CW sdr";
-char m_lsb[] = " LSB";
-char m_usb[] = " USB";
-char m_am[]  = " AM";
-char m_sam[] = " ";
-char m_data[]= " ";
+const char m_qcx[] = " CW QCX";          // qcx audio sampled on A2 via audio library
+const char m_cw[]  = " CW sdr";
+const char m_lsb[] = " LSB";
+const char m_usb[] = " USB";
+const char m_am[]  = " AM";
+const char m_sam[] = " ";
+const char m_data[]= " ";
 
 struct menu mode_menu_data = {
    { "SDR Mode" },
@@ -226,25 +202,26 @@ struct menu mode_menu_data = {
    2
 };
 
-char w_6k[] =     " 6000";     // set actual filters wider than their names as have
-char w_4k[] =     " 4500";     // 4 IIR filters cascaded.  12db down at cutoff?
-char w_3600[] =   " 3600";
-char w_3300[] =   " 3300";
-char w_3000[] =   " 3000";
-char w_2700[] =   " 2700";
-char w_2400[] =   " 2400";
-char w_1100[] =   " 1100";
+const char w_6k[] =     " 6000";
+const char w_4k[] =     " 4500";
+const char w_3600[] =   " 3600";
+const char w_3300[] =   " 3300";
+const char w_3000[] =   " 3000";
+const char w_2700[] =   " 2700";
+const char w_2400[] =   " 2400";
+const char w_1100[] =   " 1100";
 struct menu band_width_menu_data = {
    { "Band Width" },
    { w_6k, w_4k,  w_3600, w_3300, w_3000, w_2700, w_2400, w_1100 },
-   { 6000+500, 4500+500, 3600+500, 3300+500, 3000+400, 2700+300, 2400+200, 1100+100 },
+   { 6000, 4500, 3600, 3300, 3000, 2700, 2400, 1100 },
    48,
-   ILI9341_MAROON,
-   2
+   ILI9341_PURPLE,
+   4
 };
 
-int mode_mux_selection;    // save current audio path so can switch to sidetone during TX.
-int rx_tx_state;           // save current RX TX so can act only when it changes
+uint8_t mode_mux_selected;     // save current audio path so can switch to sidetone during TX.
+uint8_t rx_tx_state;           // save current RX TX so can act only when it changes
+uint8_t ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
 
 /********************************************************************************/
 
@@ -272,6 +249,11 @@ int i,j,r,g,b;
   
   ts.begin();                        // touchscreen
   ts.setRotation(1);
+  
+  tft.setTextSize(2);                // sign on message, else see a blank screen until qcx boots.
+  tft.setTextColor(ILI9341_WHITE);
+  tft.setCursor(80,200);
+  tft.print("QCX+ +SDR");
  
   menu_dispatch = &hidden_menu;     // function pointer for screen touch
   vfo_mode = VFO_LSB;                
@@ -280,19 +262,20 @@ int i,j,r,g,b;
   AudioNoInterrupts();
   AudioMemory(20);
   codec.enable();
-  codec.volume(0.6);                        // headphones, not used eventually
+  codec.volume(0.5);                        // headphone volume, not used eventually
   codec.unmuteHeadphone();
-  codec.inputSelect( AUDIO_INPUT_LINEIN );  
-  codec.lineInLevel(12);                    // 0 to 15  !!! use as attenuator, reduce gain on loud signals
-  codec.lineOutLevel(20);                   // 13 to 31 with 13 the loudest.  Use to balance gain with
-                                            // the QCX signal level.  One time adjustment.
+  codec.inputSelect( AUDIO_INPUT_LINEIN );
+  // codec analog gains  
+  codec.lineInLevel(15);                    // 0 to 15  !!! use as attenuator, reduce gain on loud signals
+  codec.lineOutLevel(25);                   // 13 to 31 with 13 the loudest. Use for part of AGC?
+                                            
  
- // H45plus.begin(h45p,HILBERT_SIZE);
- // H45minus.begin(h45m,HILBERT_SIZE);
+  //H45plus.begin(h45p,HILBERT_SIZE);
+  //H45minus.begin(h45m,HILBERT_SIZE);
   H45plus.begin(h90p,HILBERT_SIZE);        // try the 90deg and 0deg phase shift filters
   H45minus.begin(h00m,HILBERT_SIZE);       // Maybe just a little bit better
   USBmixer.gain(1,1.0);                    // add signals get USB.   Lower gain if addition causes clipping.
-  USBmixer.gain(2,1.0);
+  USBmixer.gain(2,1.0);                    // although will want to lower line in gain first
   LSBmixer.gain(1,1.0);                    // sub signals get LSB
   LSBmixer.gain(2,-1.0);
 
@@ -300,17 +283,19 @@ int i,j,r,g,b;
   SSBselect.gain(1,0.0);                   // turn off USB
   SSBselect.gain(2,1.0);                   // LSB is default on startup
   SSBselect.gain(3,0.0);                   // turn off AM audio
-  mode_mux_selection = 2;                  // LSB
+  mode_mux_selected = 2;                   // LSB
 
-  BandWidth.setLowpass(0,4100,0.7);
-  BandWidth.setLowpass(1,4100,0.7);
-  BandWidth.setLowpass(2,4100,0.7);
-  BandWidth.setLowpass(3,4100,0.7);        // 4 IIR lowpass cascade, 12 db down at 4100 now?
+  BandWidth.setLowpass(0,3000,0.67);       // use these or actual butterworth Q's
+  BandWidth.setLowpass(1,3000,1.10);
+  BandWidth.setLowpass(2,3000,0.707);
+  BandWidth.setLowpass(3,3000,1.00);       // 4 IIR lowpass cascade
 
   IF12r7.begin(AM12r7fir,30);              // AM filter at 12.7k audio IF frequency
   AudioInterrupts();
 
-  
+  USBscope.averageTogether(40);
+  LSBscope.averageTogether(40);
+
 }
 
 
@@ -409,11 +394,11 @@ int sel;
    if( band_width_menu_data.param[sel] != -1 ){
       band_width_menu_data.current = sel;
       sel = band_width_menu_data.param[sel];
-     //Serial.println(sel);
-      BandWidth.setLowpass(0,sel,0.7);
-      BandWidth.setLowpass(1,sel,0.7);
-      BandWidth.setLowpass(2,sel,0.7);
-      BandWidth.setLowpass(3,sel,0.7);
+     //Serial.println(sel);                    
+      BandWidth.setLowpass(0,sel,0.51);
+      BandWidth.setLowpass(1,sel,0.60);
+      BandWidth.setLowpass(2,sel,0.90);
+      BandWidth.setLowpass(3,sel,2.56);
    }
    
    menu_cleanup();
@@ -468,7 +453,7 @@ static int c_state;
 int32_t t;
 
    // poll radio once a second, process qu_flags as a priority
-   if( ( millis() - cmd_tm > 1000 ) ){
+   if( ( millis() - cmd_tm > 1000 ) && ManInTheMiddle == 0 ){
       if( qu_flags & QUIF ) cat.print("IF;");
       else if( qu_flags & QUFB ) cat.print("FB;");
       else if( qu_flags & QUFA ) cat.print("FA;");
@@ -494,6 +479,11 @@ int32_t t;
    }
 
    if( cat.available() ) radio_control();
+   if( Serial.available() ){
+       char c = Serial.read();
+       if( ManInTheMiddle ) cat.write(c);         // CAT command repeater
+       else if( c == ';' ) ManInTheMiddle = 1;    // looks like a CAT command on USB serial
+   }
 
    t = touch();
    if( t ){
@@ -501,7 +491,10 @@ int32_t t;
       (*menu_dispatch)(t);    // off to whoever owns the touchscreen
    }
 
+   USBwaterfall();
+   LSBwaterfall();
 
+   // balance_schmoo();    // !!! testing
 }
 
 
@@ -837,6 +830,7 @@ char c;
     c = 0;
     while( cat.available() ){
        c = cat.read();
+       if( ManInTheMiddle ) Serial.write(c);  // Serial repeater mode
        response[len] = c;
        if( c == ';' ) break;
        if(++len >= CMDLEN ) len = 0;      // somethings wrong, reset
@@ -976,6 +970,161 @@ int32_t temp2;
    qu_flags &= ~QUIF;
 }
 
+
+
+void balance_schmoo(){    //  setup function.  Find the least signal on USB
+
+   // setup with a test signal received on LSB side.  This will measure the audio image on USB side.
+   // and print out the usb gain for best IQ balance at whatever audio freq was tuned.
+static float startval, endval,val, stp;
+static uint32_t  tm;
+static float minval;
+static float minpeak;
+float rdpeak;
+
+   // starting values
+   startval = 0.70;   endval = 1.3;  stp = 0.001;
+   if( val < startval || val > endval ){
+      Serial.print( minval,4);   Serial.write(' ');
+      Serial.println( minpeak,4);
+      minpeak = 2.0;
+      val = startval;
+      tm = millis();
+      USBmixer.gain(1,val);
+      USBmixer.gain(2,1/val);
+   }
+
+   if( millis() - tm < 10 ) return;
+   if( peak1.available() == 0 ) return;
+   tm = millis();
+   
+   rdpeak = peak1.read();
+   if( rdpeak < minpeak ){
+       minval = val;
+       minpeak = rdpeak;
+   }
+   val += stp;
+   USBmixer.gain(1,val);
+ 
+}
+
+
+// find a waterfall pallet color 0 to 15
+uint8_t lg2( float f, int side){    // log base 2, don't exceed 15.  f 0.0 to 1.0
+uint32_t val;
+uint8_t  r;
+uint16_t  bw_low,bw_high;
+uint8_t bw_add;
+
+    // show bandwidth on waterfall
+    bw_add = 0;
+    if( side <= 0 && (vfo_mode & VFO_LSB)){                           // LSB bandwidth coloring
+       bw_high = band_width_menu_data.param[band_width_menu_data.current];
+       bw_high /= 172;
+       side = -side;
+       if( side == bw_high || side == 0 ) return 12;
+    }
+    else if(side >= 0 && (vfo_mode & ( VFO_USB + VFO_AM + VFO_CW ))){  // USB or AM
+       bw_high = band_width_menu_data.param[band_width_menu_data.current];
+       bw_high /= 172;
+       if( vfo_mode & VFO_AM ){
+          bw_low = 73 - bw_high;
+          bw_high += 73;
+       }
+       else bw_low = 0;
+       if( side == bw_low || side == bw_high ) return 12;
+    }
+    
+    if( f < 0.0015 ) return bw_add;
+    f -= 0.0015;            // set min signal level, noise just shows on waterfall 0015
+    val = 20000 * f;        // scale here for best display < 32000 has unused pallett
+    r = 0;
+    while( val ){           // log base 2
+      ++r;
+      val >>= 1;
+      if( r == 15 ) break;
+    }
+    //r += bw_add;
+    if( r > 15 ) r = 15;
+    return r;
+}
+
+void USBwaterfall(){
+static uint8_t data[64][64];
+int i,j;
+uint8_t *p;
+uint8_t d;
+
+    if( USBscope.available() == 0 ) return;
+    if( screen_owner != DECODE ) return;
+    
+    // scroll the data the most obvious and probably slowest way
+    for( i = 63; i > 0; --i ){
+        for( j = 0; j < 64; ++j ) data[i][j] = data[i-1][j];
+    }
+    // get fft result and convert to 4 bits
+    j = 0;
+    for( i = 0; i < 64; ++i ){
+       d = lg2( USBscope.read(j),j );
+       ++j;
+       data[0][i] = d << 4;
+       d = lg2( USBscope.read(j),j );
+       ++j;
+       data[0][i] |= d;  
+    }
+
+    // display on screen
+    p = &data[0][0];
+    tft.writeRect4BPP( 161,64,128,64,p,WF );
+  
+}
+
+
+void LSBwaterfall(){
+static uint8_t data[64][64];
+int i,j;
+uint8_t *p;
+uint8_t d;
+
+    if( LSBscope.available() == 0 ) return;
+    if( screen_owner != DECODE ) return;
+    
+    // scroll the data the most obvious and probably slowest way
+    for( i = 63; i > 0; --i ){
+        for( j = 0; j < 64; ++j ) data[i][j] = data[i-1][j];
+    }
+    // get fft result and convert to 4 bits
+    j = 127;
+    for( i = 0; i < 64; ++i ){
+       d = lg2( LSBscope.read(j),-j );
+       --j;
+       data[0][i] = d;
+       d = lg2( LSBscope.read(j),-j );
+       --j;
+       data[0][i] |= d << 4;  
+    }
+
+    // display on screen
+    p = &data[0][0];
+    tft.writeRect4BPP( 160-126,64,128,64,p,WF );
+
+
+/*
+    static unsigned int c = 0;
+    ++c;
+    if( (c & 31) == 0 ) {
+    float mn,mx;                    // signal levels here !!! debug
+    mn = 1; mx = 0;
+    for( i = 0; i < 128; ++i ){
+        f = LSBscope.read(i);
+        if( f > mx ) mx = f;
+        if( f < mn ) mn = f;
+    }
+    Serial.print(mn,4);  Serial.write(' ');
+    Serial.println(mx,4);
+    }  
+    */
+}
 
 /******************************************************************/
 
