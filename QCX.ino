@@ -1,30 +1,36 @@
 /*
  *   QCX with Teensy 3.6, Audio shield, and ILI9341 touchscreen added on QCX Dev Board.
  * 
+ *   A note:  putting capacitors in C4 C7 caused the front end to pick up screen draw noise.  Line In is
+ *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
+ * 
+ * to work on  
+ *   Fancy S meter in text area when not in a decode mode ( cw, rtty, psk, hell )
+ *   Fix my antenna cable or purchase a new one.
+ *   See if TX works and power level ok.
+ *   TX using the touch keyboard
+ *   not sure I like the simulated 7 segment look
+ *   make a hole in the top case
+ *   Add a USB external wire
+ *   CW, RTTY, PSK31 decoders
+ *   Hellschrieber RX and TX
+ *      
+ *   
      
    Free pins when using audio board and display.
    Teensy 3.6.  Many more pins unused but not populated with headers.
    
   0,1    used for Serial1  Rx, Tx
-  2
+  2      mute switch 
   3 
   4
   5
   8      used for touch CS
- 16      A2  QCX audio
- 17      A3  free but can't use analog read when audio library reads ADC
+ 16      A2  
+ 17      A3  
 
 
- Considering: re-sample qcx audio and lineout audio and using DAC0 to pass audio
- to the top of the volume control.  This will allow software selection of the
- output as well as access to audio data for decoders. The qcx audio can be provided
- with AGC and/or clipping/filter for hearing protection.
-
- Current plan is to bring QCX audio into the Audio design on the SSB selection mux.  Sampled
- at the J__  just before the volume control.  The SDR audio will go to the volume control instead.
- The TX signal to external amplifier can be sampled to see when TX is active and the sidetone can
- be picked up by switching the selection mux to QCX audio.  AGC can be provided.
-
+ 
  *******************************************************************************/
 
 
@@ -36,56 +42,60 @@
 
 #include "hilbert.h"
 
-// !!! think about cutting Vusb at some point and if want permanent features of USB cat control
-// and USB audio will need access to usb on Teensy to use.
-// #define USE_USB_AUDIO        // think not needed for self contained radio but works really slick
-                             // with HDSDR.
+#define QCX_MUTE 2              // pin 2 high mutes qcx audio
 
+// #define USE_USB_AUDIO        // not needed for self contained radio but works really slick
+                                // with HDSDR.  Can include later.
+
+// added peak2. peak1 and peak2 used to avoid exceeding int16 size in the usb,lsb adders.
 // GUItool: begin automatically generated code
-// this version added QCXaudio and picks up normal I and Q
-AudioInputI2S            IQ_in;           //xy=55,254
-AudioInputAnalog         QCXaudio;           //xy=167.14288330078125,417.14288330078125
-AudioFilterFIR           H45minus;           //xy=168,338
-AudioFilterFIR           H45plus;           //xy=169,175
-AudioAnalyzeFFT256       LSBscope;       //xy=349,445
-AudioMixer4              LSBmixer;         //xy=352,328
-AudioMixer4              USBmixer;         //xy=355,181
-AudioAnalyzeFFT256       USBscope;       //xy=356,63
-AudioAnalyzePeak         peak1;          //xy=485.55556869506836,107.77777481079102
-AudioMixer4              SSBselect;         //xy=512.5,255.99996948242188
-AudioFilterFIR           IF12r7;           //xy=603.8570938110352,446.8571033477783
-AudioAnalyzeRMS          rms1;           //xy=615.5555839538574,139.99999809265137
-AudioFilterBiquad        BandWidth;        //xy=683.7499389648438,256.25
-AudioEffectRectifier     AMdet;       //xy=753.7143096923828,445.42854022979736
-AudioOutputI2S           LineOut;           //xy=861.9443359375,344.7500305175781
+AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
+AudioFilterFIR           PhaseI;           //xy=206,292
+AudioFilterFIR           PhaseQ;           //xy=212,458
 #ifdef USE_USB_AUDIO
-  AudioOutputUSB           usb1; 
-  AudioConnection          patchCord20(IQ_in, 0, usb1, 0);
-  AudioConnection          patchCord21(IQ_in, 1, usb1, 1);
+AudioOutputUSB           usb1;           //xy=361.66668701171875,369
 #endif
-AudioConnection          patchCord1(IQ_in, 0, H45plus, 0);
-AudioConnection          patchCord2(IQ_in, 1, H45minus, 0);
-AudioConnection          patchCord3(QCXaudio, 0, SSBselect, 0);
-AudioConnection          patchCord4(H45minus, 0, USBmixer, 2);
-AudioConnection          patchCord5(H45minus, 0, LSBmixer, 2);
-AudioConnection          patchCord6(H45plus, 0, USBmixer, 1);
-AudioConnection          patchCord7(H45plus, 0, LSBmixer, 1);
-AudioConnection          patchCord8(LSBmixer, LSBscope);
-AudioConnection          patchCord9(LSBmixer, 0, SSBselect, 2);
-AudioConnection          patchCord10(USBmixer, USBscope);
-AudioConnection          patchCord11(USBmixer, 0, SSBselect, 1);
-AudioConnection          patchCord12(USBmixer, peak1);
-AudioConnection          patchCord13(USBmixer, IF12r7);
-AudioConnection          patchCord14(SSBselect, BandWidth);
-AudioConnection          patchCord15(IF12r7, AMdet);
-AudioConnection          patchCord16(BandWidth, rms1);
-AudioConnection          patchCord17(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord18(BandWidth, 0, LineOut, 1);
-AudioConnection          patchCord19(AMdet, 0, SSBselect, 3);
-
-AudioControlSGTL5000     codec;     //xy=86,63
+AudioFilterFIR           H45plus;        //xy=364.66668701171875,293.3333435058594
+AudioFilterFIR           H45minus;       //xy=375.66668701171875,456.3333740234375
+AudioMixer4              USBmixer;       //xy=546.6666870117188,299.3333435058594
+AudioMixer4              LSBmixer;       //xy=549.6666870117188,450.3333740234375
+AudioAnalyzeFFT256       LSBscope;       //xy=557.8095550537109,571.9046897888184
+AudioAnalyzeFFT256       USBscope;       //xy=560.5238571166992,184.1904640197754
+AudioMixer4              SSBselect;      //xy=729.6666870117188,367.3333740234375
+AudioAnalyzePeak         peak1;          //xy=749.5238647460938,249.61903381347656
+AudioAnalyzePeak         peak2;          //xy=749,584
+AudioFilterFIR           IF12r7;         //xy=751.8095397949219,518.6190452575684
+AudioEffectRectifier     AMdet;          //xy=894.6666641235352,517.6189670562744
+AudioFilterBiquad        BandWidth;      //xy=900.666748046875,368.3333740234375
+AudioAnalyzeRMS          rms1;           //xy=964.666748046875,265.33331298828125
+AudioOutputI2S           LineOut;        //xy=1074.666748046875,462.3333740234375
+AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
+AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
+AudioConnection          patchCord3(PhaseI, H45plus);
+#ifdef USE_USB_AUDIO
+AudioConnection          patchCord4(PhaseI, 0, usb1, 0);
+AudioConnection          patchCord6(PhaseQ, 0, usb1, 1);
+#endif
+AudioConnection          patchCord5(PhaseQ, H45minus);
+AudioConnection          patchCord7(H45plus, 0, USBmixer, 1);
+AudioConnection          patchCord8(H45plus, 0, LSBmixer, 1);
+AudioConnection          patchCord9(H45minus, 0, USBmixer, 2);
+AudioConnection          patchCord10(H45minus, 0, LSBmixer, 2);
+AudioConnection          patchCord11(USBmixer, USBscope);
+AudioConnection          patchCord12(USBmixer, 0, SSBselect, 1);
+AudioConnection          patchCord13(USBmixer, peak1);
+AudioConnection          patchCord14(USBmixer, IF12r7);
+AudioConnection          patchCord15(LSBmixer, LSBscope);
+AudioConnection          patchCord16(LSBmixer, 0, SSBselect, 2);
+AudioConnection          patchCord17(LSBmixer, peak2);
+AudioConnection          patchCord18(SSBselect, BandWidth);
+AudioConnection          patchCord19(IF12r7, AMdet);
+AudioConnection          patchCord20(AMdet, 0, SSBselect, 3);
+AudioConnection          patchCord21(BandWidth, rms1);
+AudioConnection          patchCord22(BandWidth, 0, LineOut, 0);
+//AudioConnection          patchCord23(BandWidth, 0, LineOut, 1);
+AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
 // GUItool: end automatically generated code
-
 
 
 // we have 65k colors.  How to pick one? Limit to just 16.
@@ -148,7 +158,7 @@ uint8_t  vfo_mode;           // undefined, should pick up value on init
 uint32_t cmd_tm;              // command interval timer
 uint8_t qu_flags;
 
-// cw decode
+// printing cw decode
 #define DECODE_LINES 5
 #define D_LEFT  8               // margins
 #define D_BOTTOM 238            // 
@@ -192,11 +202,12 @@ const char m_usb[] = " USB";
 const char m_am[]  = " AM";
 const char m_sam[] = " ";
 const char m_data[]= " ";
+const char m_phase[] = "Phase";
 
 struct menu mode_menu_data = {
    { "SDR Mode" },
-   { m_qcx,m_cw,m_lsb,m_usb,m_am,m_sam,m_data },
-   {0,1,2,3,4,-1,-1,-1},
+   { m_qcx,m_cw,m_lsb,m_usb,m_am,m_sam,m_data,m_phase },
+   {0,1,2,3,4,-1,-1,7},
    48,
    ILI9341_PURPLE,
    2
@@ -219,9 +230,23 @@ struct menu band_width_menu_data = {
    4
 };
 
-uint8_t mode_mux_selected;     // save current audio path so can switch to sidetone during TX.
-uint8_t rx_tx_state;           // save current RX TX so can act only when it changes
 uint8_t ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
+
+
+// phase correction FIRs. Apparently sometimes the I2s audio samples are 1 step out of phase
+// and waterfall shows very little opposite sideband suppression
+int16_t  PhaseIfir[2] = { 32767, 0 };    // swap constants to change phasing
+int16_t  PhaseQfir[2] = { 32767, 0 };
+
+int peak_atn = 15;        // auto attenuation of line_input, atn will be peak_atn - 15
+float agc_gain = 1.0;
+int mux_selected;
+
+// keyboard transmit
+#define TBUFSIZE  16
+char tbuf[TBUFSIZE];            // power of two buffer
+int  t_in, t_out;
+uint8_t tx_in_progress;
 
 /********************************************************************************/
 
@@ -242,6 +267,9 @@ int i,j,r,g,b;
      for( j = 0; j < 25; ++j ) dtext[i][j] = ' ';
      dtext[i][25] = 0;                               // terminate as a string
   }
+
+  pinMode(QCX_MUTE,OUTPUT);
+  digitalWriteFast(QCX_MUTE,HIGH);
   
   tft.begin();
   tft.fillScreen(ILI9341_BLACK);
@@ -266,14 +294,17 @@ int i,j,r,g,b;
   codec.unmuteHeadphone();
   codec.inputSelect( AUDIO_INPUT_LINEIN );
   // codec analog gains  
-  codec.lineInLevel(15);                    // 0 to 15  !!! use as attenuator, reduce gain on loud signals
-  codec.lineOutLevel(25);                   // 13 to 31 with 13 the loudest. Use for part of AGC?
-                                            
- 
+  codec.lineInLevel(15);                    // 0 to 15, used as attenuator, reduce gain on loud signals
+  codec.lineOutLevel(30);                   // 13 to 31 with 13 the loudest. Use for part of AGC? (25)
+  //codec.adcHighPassFilterDisable();         // less noise ? don't notice any change
+  //codec.adcHighPassFilterFreeze();          // try this one
+                                             
   //H45plus.begin(h45p,HILBERT_SIZE);
   //H45minus.begin(h45m,HILBERT_SIZE);
   H45plus.begin(h90p,HILBERT_SIZE);        // try the 90deg and 0deg phase shift filters
   H45minus.begin(h00m,HILBERT_SIZE);       // Maybe just a little bit better
+  PhaseI.begin(PhaseIfir,2);               // Phasing change delays if needed
+  PhaseQ.begin(PhaseQfir,2);
   USBmixer.gain(1,1.0);                    // add signals get USB.   Lower gain if addition causes clipping.
   USBmixer.gain(2,1.0);                    // although will want to lower line in gain first
   LSBmixer.gain(1,1.0);                    // sub signals get LSB
@@ -283,7 +314,7 @@ int i,j,r,g,b;
   SSBselect.gain(1,0.0);                   // turn off USB
   SSBselect.gain(2,1.0);                   // LSB is default on startup
   SSBselect.gain(3,0.0);                   // turn off AM audio
-  mode_mux_selected = 2;                   // LSB
+  mux_selected = 2;
 
   BandWidth.setLowpass(0,3000,0.67);       // use these or actual butterworth Q's
   BandWidth.setLowpass(1,3000,1.10);
@@ -293,8 +324,8 @@ int i,j,r,g,b;
   IF12r7.begin(AM12r7fir,30);              // AM filter at 12.7k audio IF frequency
   AudioInterrupts();
 
-  USBscope.averageTogether(40);
-  LSBscope.averageTogether(40);
+  USBscope.averageTogether(50);            // or 40 for faster waterfall
+  LSBscope.averageTogether(50);
 
 }
 
@@ -319,7 +350,11 @@ int32_t  yt, xt;
       menu_display( &band_width_menu_data );
       menu_dispatch = &band_width_menu;
    }
-   // else if()                          // other options !!! hot spot lower right corner for TX
+   else if( yt > 190 && xt > 270 && (vfo_mode & VFO_CW) ){  // keyboard CW sending
+      menu_dispatch = &key_tx;
+      key_tx(0);
+   }
+                           
    else menu_cleanup();                  // not active part of the screen, return to normal op.
 }
 
@@ -328,49 +363,48 @@ int selection;
 
    selection = touch_decode( t, mode_menu_data.y_size );
    if( mode_menu_data.param[selection] != -1 ){
-      mode_menu_data.current = selection;
-      selection = mode_menu_data.param[selection];
+      if( selection != 7 ) mode_menu_data.current = selection;  // added phasing to this menu
+      selection = mode_menu_data.param[selection];              // perhaps it should be elsewhere
 
-      // !!! eventually gain will need to be AGC controlled
-
-      vfo_mode &= 0x0f;        // save the qcx mode flags, clear the sdr mode flags
+      if( selection != 7 ) vfo_mode &= 0x0f;    // save the qcx mode flags, clear the sdr mode flags
       switch( selection ){
         case 0:     // QCX audio selected
                  vfo_mode |= VFO_CW;
-                 SSBselect.gain(0,0.5);                   // select QCX audio                 
+                 digitalWriteFast(QCX_MUTE,LOW);          // select qcx audio      
                  SSBselect.gain(1,0.0);                   // mute LSB,USB,AM
                  SSBselect.gain(2,0.0);
                  SSBselect.gain(3,0.0);
-                 mode_mux_selected = 0;
+                 mux_selected = 0;
         break;
         case 1:  vfo_mode |= VFO_CW;
-                 SSBselect.gain(0,0.0);                 
-                 SSBselect.gain(1,1.0);                   // turn on USB
+                 digitalWriteFast(QCX_MUTE,HIGH);                 
+                 SSBselect.gain(1,agc_gain);                   // turn on USB
                  SSBselect.gain(2,0.0);
                  SSBselect.gain(3,0.0);
-                 mode_mux_selected = 1;
+                 mux_selected = 1;
         break;
         case 2:  vfo_mode |= VFO_LSB;  
-                 SSBselect.gain(0,0.0);                 
+                 digitalWriteFast(QCX_MUTE,HIGH);                 
                  SSBselect.gain(1,0.0);
-                 SSBselect.gain(2,1.0);                   // turn on LSB
+                 SSBselect.gain(2,agc_gain);                   // turn on LSB
                  SSBselect.gain(3,0.0);
-                 mode_mux_selected = 2;
+                 mux_selected = 2;
         break;
         case 3:  vfo_mode |= VFO_USB;
-                 SSBselect.gain(0,0.0);
-                 SSBselect.gain(1,1.0);                   // turn on USB
+                 digitalWriteFast(QCX_MUTE,HIGH);
+                 SSBselect.gain(1,agc_gain);                   // turn on USB
                  SSBselect.gain(2,0.0);
                  SSBselect.gain(3,0.0);
-                 mode_mux_selected = 1;
+                 mux_selected = 1;
         break;
         case 4:  vfo_mode |= VFO_AM;
-                 SSBselect.gain(0,0.0);
+                 digitalWriteFast(QCX_MUTE,HIGH);
                  SSBselect.gain(1,0.0);
                  SSBselect.gain(2,0.0);
-                 SSBselect.gain(3,1.0);                   // turn on AM
-                 mode_mux_selected = 3;
-        break;                      
+                 SSBselect.gain(3,agc_gain);                   // turn on AM
+                 mux_selected = 3;
+        break;
+        case 7:  PhaseChange(1);  break;                  // phasing correction    
       }
      
    }
@@ -406,6 +440,39 @@ int sel;
 
 void decode_menu( int32_t t ){
   
+}
+
+// I2S audio sometimes starts with I and Q out of order
+void PhaseChange(uint8_t chg){
+static int val;
+
+   if( chg ){
+      if( ++val > 2 ) val = 0;                            // rotate through the settings
+   }
+      // print 
+   tft.setTextSize( 1 );
+   tft.setCursor(262,66);
+   tft.setTextColor(EGA[14],0);
+   tft.print("Ph:  ");
+
+   switch( val ){
+      case 0:  
+         PhaseIfir[0] = 32767;   PhaseIfir[1] = 0;        // normal in phase
+         PhaseQfir[0] = 32767;   PhaseQfir[1] = 0;
+         tft.print("1010");
+      break;
+      case 1:
+         PhaseIfir[0] = 32767;   PhaseIfir[1] = 0;    
+         PhaseQfir[0] = 0;       PhaseQfir[1] = 32767;    // delay Q  ( delay I if fir runs backward )
+         tft.print("1001");
+      break;
+      case 2:
+         PhaseIfir[0] = 0;       PhaseIfir[1] = 32767;    // delay I
+         PhaseQfir[0] = 32767;   PhaseQfir[1] = 0;
+         tft.print("0110");
+      break;
+   }   
+
 }
 
 void menu_display( struct menu *m ){    // display any of the menus on the screen
@@ -454,11 +521,11 @@ int32_t t;
 
    // poll radio once a second, process qu_flags as a priority
    if( ( millis() - cmd_tm > 1000 ) && ManInTheMiddle == 0 ){
-      if( qu_flags & QUIF ) cat.print("IF;");
+      if( tx_in_progress ) cat.print("KY;");
+      else if( qu_flags & QUIF ) cat.print("IF;");
       else if( qu_flags & QUFB ) cat.print("FB;");
       else if( qu_flags & QUFA ) cat.print("FA;");
-      else if( qu_flags & QUTB && screen_owner == DECODE ) cat.print("TB;");
-      else if( qu_flags & QUTB ) cat.print("TB0;");
+      else if( qu_flags & QUTB && screen_owner == DECODE && (vfo_mode & VFO_CW ) ) cat.print("TB;");
       else{
           switch(c_state){                         // poll radio round robin for missed packet recovery
               case 0: case 2: case 4: case 6: case 8:
@@ -466,10 +533,10 @@ int32_t t;
               case 1: cat.print("FA;");   break;
               case 3: cat.print("QU1;");  break;   // enable flags
               case 5: cat.print("FB;");   break;
-              case 7: if( screen_owner == DECODE ) cat.print("TB1;");
-                      else cat.print("TB0;");  
+              case 7: if( screen_owner == DECODE && (vfo_mode & VFO_CW ) ) cat.print("TB1;");
+                      //  else cat.print("TB0;");  keep enabled but don't get the info unless CW mode
                       break;   // enable/disable decode flag
-              case 9: if( screen_owner == DECODE ) cat.print("TB;");
+              case 9: if( screen_owner == DECODE && (vfo_mode & VFO_CW ) ) cat.print("TB;");
                       break;        
          }
          ++c_state;
@@ -494,17 +561,95 @@ int32_t t;
    USBwaterfall();
    LSBwaterfall();
 
+   auto_atn();             // front end gain reduction if rcv very loud signals
+   agc();
+
    // balance_schmoo();    // !!! testing
 }
 
 
+// avoid overload.  This looks at 40khz of signal on USB and LSB so not a replacement for AGC
+// both sideband signals feed the bandscope even if not listened to
+void auto_atn(){           // lower front end gain if signals approach overload
+static uint32_t tm;        
+static int no_chg_cnt;     // slowly raise gain
+
+   if( millis() - tm < 10 ) return;
+   if( peak1.available() == 0 ) return;
+   if( peak2.available() == 0 ) return;
+   ++no_chg_cnt;
+   tm = millis();
+   
+   if( peak_atn > 0 && (peak1.read() > 0.9 || peak2.read() > 0.9) ){    // lower gain on strong signal
+       --peak_atn;
+       codec.lineInLevel(peak_atn);
+       vfo_mode_disp();
+       no_chg_cnt = 0;
+   }
+   // raise gain if no strong signals for awhile
+   if( no_chg_cnt > 200 && peak_atn < 15 ){        // 200 == 2 seconds
+       ++peak_atn;
+       codec.lineInLevel(peak_atn);
+       vfo_mode_disp();
+       no_chg_cnt = 0;
+   }
+}
+
+
+#define AGC_FLOOR 0.10      // 0.15
+#define AGC_SLOPE 6.0       //  8.0
+#define AGC_HANG 300
+void agc(){
+static uint32_t tm;
+static float sig;
+static int hang;
+float reading;
+int ch;
+
+   if( millis() - tm < 1 ) return;      // working at 1000hz
+   if( rms1.available() == 0 ) return;
+   tm = millis();
+
+   ch = 0;
+   reading = rms1.read();
+   if( reading > sig && reading > AGC_FLOOR ){         // attack
+       sig = sig + 0.001;
+       ch = 1;
+       hang = 0;
+   }
+   else if( sig > AGC_FLOOR && hang++ > AGC_HANG ){    // decay
+       sig = sig - 0.00005;
+       ch = 1;
+   }
+
+   if( ch ){
+     agc_gain = sig - AGC_FLOOR;
+     agc_gain = agc_gain * AGC_SLOPE;
+     agc_gain = 1.0 - agc_gain;     
+     SSBselect.gain(mux_selected,agc_gain);
+       // Serial.println(agc_gain);
+     if( screen_owner == DECODE ){
+        tft.setTextSize(1);
+        tft.setTextColor(EGA[14],0);
+        tft.setCursor(262,114);  
+        tft.print("Sig: ");
+        tft.print(sig); 
+     } 
+   }
+  
+}
+
+// send cw via a touchscreen keyboard
 void key_tx( int32_t t ){
 int x,y;
 char c;
+static char buff[3][25];    // screen display
+static int pos;
 
    if( screen_owner != KEYBOARD ){     // need to display the keyboard
       screen_owner = KEYBOARD;
-      tft.fillRect(0, 80, 320, 160, EGA[0]);
+      tft.fillScreen(ILI9341_BLACK);
+      // tft.fillRect(0, 80, 320, 160, EGA[0]);
       tft.setTextSize(2);
       tft.setTextColor( ILI9341_YELLOW, ILI9341_MAROON );
       for( y = 0;  y < 5; ++y ){
@@ -522,20 +667,49 @@ char c;
       tft.fillRect( 6*32+3, 80 + 4*32+3, 4*32 -6, 32-6 , ILI9341_MAROON);
       tft.setCursor( 6*32 + 6, 80 + 4*32 + 6 );
       tft.print("SPACE");
+      return;                // ignore this touch
    }
 
    x = t >> 8;   y = t & 0xff;
-   tft.setCursor(80-12,80-12);
+   // tft.setCursor(80-12,80-12);
    y -= 80;
    x /= 32;   y /= 32;
 
-   c = kb[y][x];
-   if( x >= 0 && x < 10 && y >= 0 && y < 5 )  tft.write( c );
+   c = ' ';
+   if( x >= 0 && x < 10 && y >= 0 && y < 5 ){
+      c = kb[y][x];
+      if( ++pos >= 24 ){       // scroll text
+          buff[2][24] = 0;
+          for(y = 0; y < 2; ++y){
+             for( x = 0; x < 25; ++x ) buff[y][x] = buff[y+1][x];
+          }
+          for( x = 0; x < 24; ++x ) buff[2][x] = ' ';
+          buff[2][24] = 0;
+          tft.setTextSize(2);
+          tft.setTextColor(EGA[14],0);
+          for( y = 0; y < 3; ++y ){
+             tft.setCursor( 5, 5 + 22*y );
+             buff[y][24] = 0;
+             tft.print(&buff[y][0]);
+          }
+          pos = 0;
+      }
+      
+      tft.setCursor( 5 + 12*pos, 5 + 22 * 2 );
+      tft.setTextSize(2);
+      tft.setTextColor(EGA[15],0);
+      tft.write( c );
+      buff[2][pos] = c;
+      tbuf[t_in++] = c;
+      t_in &= (TBUFSIZE-1);
+      cat.print("KY;");
+   }
 
    if( c == '*' ){
-     tft.fillRect(0, 80, 320, 160, EGA[0]);
-     screen_owner = DECODE;
-     cat.print("TB1;");
+     //tft.fillRect(0, 80, 320, 160, EGA[0]);
+     //screen_owner = DECODE;
+     menu_cleanup();
+     //cat.print("TB1;");
    }
 }
 
@@ -619,16 +793,22 @@ int u,l,c,m;
     
    tft.drawLine(0,61,640,60,EGA[4]);
    tft.drawLine(0,62,640,61,EGA[4]);
-   
-       //  underline active tuning digit with best guess at step
-    /*   
-   s = stp;    
-   if( r ) pos = 278, s = rit_stp;    // rit active
-   else if( b ) pos = 183;            // vfo b
-   else pos = 53;                     // vfo a
-   tft.drawLine(pos+s,40,pos+s+10,40,EGA[14]); 
-   tft.drawLine(pos+s,41,pos+s+10,41,EGA[14]);
-   */ 
+
+   PhaseChange(0);           // just print current value
+   tft.setCursor(262,78);    // print bandwidth ( spacing 12 pixel ? )
+   tft.setTextSize(1);
+   tft.setTextColor(EGA[14],0);
+   tft.print("BW: ");
+   tft.print(band_width_menu_data.menu_item[band_width_menu_data.current]);
+   tft.setCursor(262,90);
+   tft.print("Stp: ");
+   if(stp <= 1000 ) p_leading(stp,4);
+   tft.setCursor(262,102);
+   tft.print("Atn: ");
+   tft.print(peak_atn - 15);   tft.write(' ');
+   tft.setCursor(262,114);
+   //tft.print("Sig: ");
+   //tft.print(rms1.read());  
 }
 
 
@@ -855,8 +1035,38 @@ char c;
     if( response[0] == 'I' && response[1] == 'F' ) cat_mode();
     if( response[0] == 'Q' && response[1] == 'U' ) cat_qu_flags();
     if( response[0] == 'T' && response[1] == 'B' ) cat_decode();
+    if( response[0] == 'K' && response[1] == 'Y' ) cat_transmit();
 
     len = 0;     // reset string to start for next command
+}
+
+
+void cat_transmit(){    // sending via the touch keyboard
+
+   if( response[2] == '1' ) tx_in_progress = 1;
+   else{
+       tx_in_progress = 0;
+       if( t_in != t_out ) cat_transmit2();    // punt
+   }
+}
+
+void cat_transmit2(){
+char msg[16];
+int  i;
+char c;
+
+   strcpy(msg,"KY ");
+   i = 3;
+   while( t_in != t_out ){
+      c = tbuf[t_out++];
+      t_out &= ( TBUFSIZE-1);
+      if( c == '*' ) break;         // switch to receive
+      msg[i++] = c;
+      if( i > 12 ) break;
+   }
+   msg[i++] = ';';
+   msg[i] = 0;
+   if( i > 4 ) cat.print(msg);      // avoid null message KY ;
 }
 
 void cat_decode(){
@@ -923,10 +1133,8 @@ int32_t temp, s;
 
        temp = stp;                       // get tuning rate from how much the vfo changed
        if( s < 0 ) s = -s;
-       if( s >= 1000 ) temp = 0;         // temp is the pixel positions for the digit underline
-       else if( s == 500 ) temp = 12;
-       else if( s >= 100 ) temp = 24;
-       else temp = 36;
+       if( s >= 1000 ) temp = 1000;   
+       else temp = s;
 
        if( temp != stp ){
            stp = temp;
@@ -1014,15 +1222,13 @@ uint8_t lg2( float f, int side){    // log base 2, don't exceed 15.  f 0.0 to 1.
 uint32_t val;
 uint8_t  r;
 uint16_t  bw_low,bw_high;
-uint8_t bw_add;
 
     // show bandwidth on waterfall
-    bw_add = 0;
     if( side <= 0 && (vfo_mode & VFO_LSB)){                           // LSB bandwidth coloring
        bw_high = band_width_menu_data.param[band_width_menu_data.current];
        bw_high /= 172;
        side = -side;
-       if( side == bw_high || side == 0 ) return 12;
+       if( side == bw_high || side == 0 ) return 10;
     }
     else if(side >= 0 && (vfo_mode & ( VFO_USB + VFO_AM + VFO_CW ))){  // USB or AM
        bw_high = band_width_menu_data.param[band_width_menu_data.current];
@@ -1032,10 +1238,13 @@ uint8_t bw_add;
           bw_high += 73;
        }
        else bw_low = 0;
-       if( side == bw_low || side == bw_high ) return 12;
+       if( side == bw_low || side == bw_high ) return 10;
     }
+
+    // show the ends of the waterfall
+    if( side == 127 || side == -127 ) return 8;
     
-    if( f < 0.0015 ) return bw_add;
+    if( f < 0.0015 ) return 0;
     f -= 0.0015;            // set min signal level, noise just shows on waterfall 0015
     val = 20000 * f;        // scale here for best display < 32000 has unused pallett
     r = 0;
@@ -1075,7 +1284,7 @@ uint8_t d;
 
     // display on screen
     p = &data[0][0];
-    tft.writeRect4BPP( 161,64,128,64,p,WF );
+    tft.writeRect4BPP( 131,64,128,64,p,WF );
   
 }
 
@@ -1096,17 +1305,17 @@ uint8_t d;
     // get fft result and convert to 4 bits
     j = 127;
     for( i = 0; i < 64; ++i ){
+       d = lg2( LSBscope.read(j),-j );      // neg j for lower sideband bandwidth edges
+       --j;
+       data[0][i] = d << 4;
        d = lg2( LSBscope.read(j),-j );
        --j;
-       data[0][i] = d;
-       d = lg2( LSBscope.read(j),-j );
-       --j;
-       data[0][i] |= d << 4;  
+       data[0][i] |= d;  
     }
 
     // display on screen
     p = &data[0][0];
-    tft.writeRect4BPP( 160-126,64,128,64,p,WF );
+    tft.writeRect4BPP( 130-126,64,128,64,p,WF );
 
 
 /*
