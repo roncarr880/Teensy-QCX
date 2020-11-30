@@ -5,14 +5,14 @@
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
  * to work on  
- *   Fancy S meter in text area when not in a decode mode ( cw, rtty, psk, hell )
+ *   Try distributed waterfall writes for maybe less noise
  *   Fix my antenna cable or purchase a new one.
+ *   Wire a fet to switch dit or dah to ground for hellschreiber
  *   See if TX works and power level ok.
- *   TX using the touch keyboard
- *   not sure I like the simulated 7 segment look
  *   make a hole in the top case
  *   Add a USB external wire
- *   CW, RTTY, PSK31 decoders
+ *   CW, RTTY, PSK31 decoders - software only
+ *   Fancy S meter in text area when not in a decode mode ( cw, rtty, psk, hell )
  *   Hellschrieber RX and TX
  *      
  *   
@@ -241,6 +241,8 @@ int16_t  PhaseQfir[2] = { 32767, 0 };
 int peak_atn = 15;        // auto attenuation of line_input, atn will be peak_atn - 15
 float agc_gain = 1.0;
 int mux_selected;
+float svalue;
+float rms_value;
 
 // keyboard transmit
 #define TBUFSIZE  16
@@ -294,8 +296,8 @@ int i,j,r,g,b;
   codec.unmuteHeadphone();
   codec.inputSelect( AUDIO_INPUT_LINEIN );
   // codec analog gains  
-  codec.lineInLevel(15);                    // 0 to 15, used as attenuator, reduce gain on loud signals
-  codec.lineOutLevel(30);                   // 13 to 31 with 13 the loudest. Use for part of AGC? (25)
+  codec.lineInLevel(15);                    // 0 to 15, used as attenuator, 3.12v to 0.24v
+  codec.lineOutLevel(30);                   // 13 to 31 with 13 the loudest. 3.16v to 1.16v
   //codec.adcHighPassFilterDisable();         // less noise ? don't notice any change
   //codec.adcHighPassFilterFreeze();          // try this one
                                              
@@ -429,10 +431,10 @@ int sel;
       band_width_menu_data.current = sel;
       sel = band_width_menu_data.param[sel];
      //Serial.println(sel);                    
-      BandWidth.setLowpass(0,sel,0.51);
-      BandWidth.setLowpass(1,sel,0.60);
-      BandWidth.setLowpass(2,sel,0.90);
-      BandWidth.setLowpass(3,sel,2.56);
+      BandWidth.setLowpass(0,sel,0.67);       // 0.51  butterworth constants
+      BandWidth.setLowpass(1,sel,1.10);       // 0.60
+      BandWidth.setLowpass(2,sel,0.707);       // 0.90
+      BandWidth.setLowpass(3,sel,1.00);       // 2.56
    }
    
    menu_cleanup();
@@ -521,7 +523,7 @@ int32_t t;
 
    // poll radio once a second, process qu_flags as a priority
    if( ( millis() - cmd_tm > 1000 ) && ManInTheMiddle == 0 ){
-      if( tx_in_progress ) cat.print("KY;");
+      if( tx_in_progress || t_in != t_out ) cat.print("KY;");
       else if( qu_flags & QUIF ) cat.print("IF;");
       else if( qu_flags & QUFB ) cat.print("FB;");
       else if( qu_flags & QUFA ) cat.print("FA;");
@@ -611,7 +613,7 @@ int ch;
    tm = millis();
 
    ch = 0;
-   reading = rms1.read();
+   rms_value = reading = rms1.read();
    if( reading > sig && reading > AGC_FLOOR ){         // attack
        sig = sig + 0.001;
        ch = 1;
@@ -636,7 +638,90 @@ int ch;
         tft.print(sig); 
      } 
    }
+
+   smeter();
   
+}
+
+
+void smeter(){
+static uint8_t  onscreen;
+float angle;
+int x,y;
+static int lastx = 160,lasty = 239;
+int diff;
+float tvalue;
+float ftemp;
+
+   if( screen_owner != DECODE || (vfo_mode & VFO_CW) ){       // show the meter ?
+      onscreen = 0;
+      return;
+   }
+
+   if( onscreen == 0 ){         // init the meter area
+      onscreen = 1;
+      tft.fillRect(5, 129, 310, 110, EGA[0]);
+      for( ftemp = 135; ftemp > 45; ftemp -= 0.2 ){
+            y = 240 - 90 * sin(ftemp/57.3);
+            x = 160 + 180 * cos(ftemp/57.3);
+            tft.drawPixel(x,y,EGA[15]);
+            tft.drawPixel(x,y-1,EGA[15]);
+            tft.drawPixel(x,y+1,EGA[15]);
+            if( int(ftemp) == 90 )  tft.drawLine(x,y,x,y-7,EGA[15]);
+            if( int(ftemp) >= 133 ) tft.drawLine(x,y,x-4,y-6,EGA[15]);
+            if( int(ftemp) <= 46 )  tft.drawLine(x,y,x+4,y-6,EGA[15]);
+            if( int(ftemp) == 123 ) tft.drawLine(x,y,x-3,y-6,EGA[15]);
+            if( int(ftemp) == 111 ) tft.drawLine(x,y,x-2,y-6,EGA[15]);
+            if( int(ftemp) == 99  ) tft.drawLine(x,y,x-1,y-6,EGA[15]);
+            if( int(ftemp) == 75  ) tft.drawLine(x,y,x+1,y-6,EGA[15]);
+            if( int(ftemp) == 60  ) tft.drawLine(x,y,x+2,y-6,EGA[15]);
+            tft.setTextColor(EGA[15],0);
+            tft.setTextSize(2);
+            tft.setCursor(25,150);
+            tft.write('1');
+            tft.setCursor(90,131);
+            tft.write('5');
+            tft.setCursor(156,128);
+            tft.write('9');
+            tft.setCursor(210,131);
+            tft.print("20");
+            tft.setCursor(250,140);
+            tft.print("40");
+      }
+   }
+
+   tvalue = rms_value/agc_gain;                // what the signal would be without the agc
+   ftemp  = map( peak_atn, 0, 15, 312, 24 );   // voltage ratio due to front end attenuation
+   tvalue = ftemp * tvalue / 24.0;             // what the signal would be without the attenuator
+   tvalue *= 160;                              // fudge factor scaling to make it look good
+   tvalue = log10(tvalue);
+   if( tvalue > svalue ) svalue += 0.02;       // smooth out the meter movement
+   if( tvalue < svalue ) svalue -= 0.005;
+
+   //angle = map( svalue*10, 1, 120, 1350, 450 );    // S1 to S12 mapped to 90 deg +- 45 scaled by 10.
+   angle = map( svalue * 100, 1, 300, 13500, 4500 );   // more fudging
+   angle /= 100.0;
+  // Serial.println(angle);         // !!! debug, remove
+   if( angle < 45 ) angle = 45;
+   if( angle > 135 ) angle = 135;
+
+   y = 240 - 80 * sin(angle/57.3);
+   x = 160 + 180 * cos(angle/57.3);
+
+   diff = x - lastx;
+   if( diff < 0 ) diff = -diff;
+   if( diff > 2 ){
+      tft.drawLine(lastx-1,lasty,160,380,EGA[0]);
+      tft.drawLine(lastx,lasty,160,380,EGA[0]);
+      tft.drawLine(lastx+1,lasty,160,380,EGA[0]);
+
+      tft.drawLine(x-1,y,160,380,EGA[12]);
+      tft.drawLine(x,y,160,380,EGA[12]);           // lines clip to screen ok ?
+      tft.drawLine(x+1,y,160,380,EGA[12]);
+
+      lastx = x;
+      lasty = y;
+   }
 }
 
 // send cw via a touchscreen keyboard
