@@ -1,8 +1,8 @@
 /*
  *   QCX with Teensy 3.6, Audio shield, and ILI9341 touchscreen added on QCX Dev Board.
- *     IF version
+ *     Weaver version
          Runs the baseband version for the band scope and AM detector
-         and runs a 11 khz IF for SSB and CW
+         and runs a weaver SSB demodulator for audio.
 
  *   A note:  putting capacitors in C4 C7 caused the front end to pick up screen draw noise.  Line In is
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
@@ -41,197 +41,77 @@
 #include <Wire.h>
 #include <SPI.h>
 
-#include "hilbert_IF.h"
+#include "hilbert_W.h"
 
 #define QCX_MUTE 2              // pin 2 high mutes qcx audio
 
 // #define USE_USB_AUDIO        // not needed for self contained radio but works really slick
                                 // with HDSDR.  Can include later.
 
-// added peak2. peak1 and peak2 used to avoid exceeding int16 size in the usb,lsb adders.
-#include <Audio.h>
-#include <Wire.h>
-#include <SPI.h>
-#include <SD.h>
-#include <SerialFlash.h>
+// peak1 and peak2 used to avoid exceeding int16 size in the usb,lsb adders.
+
 
 // GUItool: begin automatically generated code
 AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
 AudioFilterFIR           PhaseI;           //xy=206,292
 AudioFilterFIR           PhaseQ;           //xy=212,458
-AudioMixer4              SSBselect;         //xy=251.32147216796875,755.03564453125
+AudioFilterBiquad        I_filter;        //xy=253.3333333333333,659.9999999999999
+AudioFilterBiquad        Q_filter;        //xy=254.16668701171875,799.5833435058594
 #ifdef USE_USB_AUDIO
 AudioOutputUSB           usb1;           //xy=361.66668701171875,369
 #endif
 AudioFilterFIR           H90plus;        //xy=364.66668701171875,293.3333435058594
 AudioFilterFIR           H00minus;       //xy=375.66668701171875,456.3333740234375
-AudioFilterFIR           SSBroof;           //xy=425,753.75
+AudioSynthWaveformSine   cosBFO;          //xy=426.66666666666663,739.9999999999999
+AudioSynthWaveformSine   sinBFO;          //xy=426.6666946411133,888.3332710266113
+AudioEffectMultiply      I_mixer;      //xy=514.9999999999999,668.3333333333333
+AudioEffectMultiply      Q_mixer;      //xy=518.3333930969238,806.6667461395264
 AudioMixer4              USBmixer;       //xy=546.6666870117188,299.3333435058594
 AudioMixer4              LSBmixer;       //xy=549.6666870117188,450.3333740234375
 AudioAnalyzeFFT256       LSBscope;       //xy=557.8095550537109,571.9046897888184
 AudioAnalyzeFFT256       USBscope;       //xy=560.5238571166992,184.1904640197754
-AudioSynthWaveformSine   BFO;          //xy=626,886
-AudioEffectMultiply      Second_mixer;      //xy=634.7499771118164,762.7500019073486
+AudioMixer4              SSBselect;         //xy=714.9999961853027,731.6667022705078
 AudioAnalyzePeak         peak2;          //xy=730.666690826416,452.3333683013916
 AudioFilterFIR           IF12r7;         //xy=733.4763412475586,358.6190776824951
 AudioAnalyzePeak         peak1;          //xy=736.1905746459961,299.6190242767334
-AudioMixer4              ModeSelect;      //xy=825.8095092773438,770.1429214477539
 AudioEffectRectifier     AMdet;          //xy=876.3334197998047,359.2855930328369
-AudioFilterBiquad        BandWidth;      //xy=985.0477104187012,768.8571186065674
-AudioAnalyzeRMS          rms1;           //xy=1187.7142181396484,685.7618789672852
-AudioOutputI2S           LineOut;        //xy=1188.4285888671875,765.8572845458984
+AudioAnalyzeRMS          rms1;           //xy=907.7141952514648,659.0952682495117
+AudioOutputI2S           LineOut;        //xy=911.7617797851562,730.8573341369629
 AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
 AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
 AudioConnection          patchCord3(PhaseI, H90plus);
 #ifdef USE_USB_AUDIO
 AudioConnection          patchCord4(PhaseI, 0, usb1, 0);
-AudioConnection          patchCord6(PhaseQ, 0, usb1, 1);
+AudioConnection          patchCord7(PhaseQ, 0, usb1, 1);
 #endif
-AudioConnection          patchCord5(PhaseQ, H00minus);
-AudioConnection          patchCord7(SSBselect, SSBroof);
-AudioConnection          patchCord8(H90plus, 0, USBmixer, 1);
-AudioConnection          patchCord9(H90plus, 0, LSBmixer, 1);
-AudioConnection          patchCord10(H00minus, 0, USBmixer, 2);
-AudioConnection          patchCord11(H00minus, 0, LSBmixer, 2);
-AudioConnection          patchCord12(SSBroof, 0, Second_mixer, 0);
-AudioConnection          patchCord13(USBmixer, USBscope);
-AudioConnection          patchCord14(USBmixer, peak1);
-AudioConnection          patchCord15(USBmixer, IF12r7);
-AudioConnection          patchCord16(USBmixer, 0, SSBselect, 1);
-AudioConnection          patchCord17(LSBmixer, LSBscope);
-AudioConnection          patchCord18(LSBmixer, peak2);
-AudioConnection          patchCord19(LSBmixer, 0, SSBselect, 2);
-AudioConnection          patchCord20(BFO, 0, Second_mixer, 1);
-AudioConnection          patchCord21(Second_mixer, 0, ModeSelect, 1);
-AudioConnection          patchCord22(IF12r7, AMdet);
-AudioConnection          patchCord23(ModeSelect, BandWidth);
-AudioConnection          patchCord24(AMdet, 0, ModeSelect, 0);
-AudioConnection          patchCord25(BandWidth, rms1);
-AudioConnection          patchCord26(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord27(BandWidth, 0, LineOut, 1);
-AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
-// GUItool: end automatically generated code
-
-
-/*
-// GUItool: begin automatically generated code
-AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
-AudioFilterFIR           PhaseI;           //xy=206,292
-AudioFilterFIR           PhaseQ;           //xy=212,458
-#ifdef USE_USB_AUDIO
-AudioOutputUSB           usb1;           //xy=361.66668701171875,369
-#endif
-AudioFilterFIR           H90plus;        //xy=364.66668701171875,293.3333435058594
-AudioFilterFIR           H00minus;       //xy=375.66668701171875,456.3333740234375
-AudioMixer4              SSBselect;         //xy=432.5714416503906,756.2856636047363
-AudioMixer4              USBmixer;       //xy=546.6666870117188,299.3333435058594
-AudioMixer4              LSBmixer;       //xy=549.6666870117188,450.3333740234375
-AudioAnalyzeFFT256       LSBscope;       //xy=557.8095550537109,571.9046897888184
-AudioAnalyzeFFT256       USBscope;       //xy=560.5238571166992,184.1904640197754
-AudioSynthWaveformSine   BFO;          //xy=626,886
-AudioEffectMultiply      Second_mixer;      //xy=634.7499771118164,762.7500019073486
-AudioAnalyzePeak         peak2;          //xy=730.666690826416,452.3333683013916
-AudioFilterFIR           IF12r7;         //xy=733.4763412475586,358.6190776824951
-AudioAnalyzePeak         peak1;          //xy=736.1905746459961,299.6190242767334
-AudioMixer4              ModeSelect;      //xy=825.8095092773438,770.1429214477539
-AudioEffectRectifier     AMdet;          //xy=876.3334197998047,359.2855930328369
-AudioFilterBiquad        BandWidth;      //xy=985.0477104187012,768.8571186065674
-AudioAnalyzeRMS          rms1;           //xy=1187.7142181396484,685.7618789672852
-AudioOutputI2S           LineOut;        //xy=1188.4285888671875,765.8572845458984
-AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
-AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
-AudioConnection          patchCord3(PhaseI, H90plus);
-#ifdef USE_USB_AUDIO
-AudioConnection          patchCord4(PhaseI, 0, usb1, 0);
-AudioConnection          patchCord6(PhaseQ, 0, usb1, 1);
-#endif
-AudioConnection          patchCord5(PhaseQ, H00minus);
-AudioConnection          patchCord7(H90plus, 0, USBmixer, 1);
-AudioConnection          patchCord8(H90plus, 0, LSBmixer, 1);
-AudioConnection          patchCord9(H00minus, 0, USBmixer, 2);
-AudioConnection          patchCord10(H00minus, 0, LSBmixer, 2);
-AudioConnection          patchCord11(SSBselect, 0, Second_mixer, 0);
-AudioConnection          patchCord12(USBmixer, USBscope);
-AudioConnection          patchCord13(USBmixer, peak1);
-AudioConnection          patchCord14(USBmixer, IF12r7);
-AudioConnection          patchCord15(USBmixer, 0, SSBselect, 1);
-AudioConnection          patchCord16(LSBmixer, LSBscope);
-AudioConnection          patchCord17(LSBmixer, peak2);
-AudioConnection          patchCord18(LSBmixer, 0, SSBselect, 2);
-AudioConnection          patchCord19(BFO, 0, Second_mixer, 1);
-AudioConnection          patchCord20(Second_mixer, 0, ModeSelect, 1);
-AudioConnection          patchCord21(IF12r7, AMdet);
-AudioConnection          patchCord22(ModeSelect, BandWidth);
-AudioConnection          patchCord23(AMdet, 0, ModeSelect, 0);
-AudioConnection          patchCord24(BandWidth, rms1);
-AudioConnection          patchCord25(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord26(BandWidth, 0, LineOut, 1);
-AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
-// GUItool: end automatically generated code
-
-
-
-// GUItool: begin automatically generated code
-AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
-AudioFilterFIR           H45minus;           //xy=199.7142791748047,801.999921798706
-AudioFilterFIR           PhaseI;           //xy=206,292
-AudioFilterFIR           H45plus;           //xy=205.42856979370117,722.8571281433105
-AudioFilterFIR           PhaseQ;           //xy=212,458
-#ifdef USE_USB_AUDIO
-AudioOutputUSB           usb1;           //xy=361.66668701171875,369
-#endif
-AudioFilterFIR           H90plus;        //xy=364.66668701171875,293.3333435058594
-AudioFilterFIR           H00minus;       //xy=375.66668701171875,456.3333740234375
-AudioMixer4              SSBselect;         //xy=432.5714416503906,756.2856636047363
-AudioMixer4              USBmixer;       //xy=546.6666870117188,299.3333435058594
-AudioMixer4              LSBmixer;       //xy=549.6666870117188,450.3333740234375
-AudioAnalyzeFFT256       LSBscope;       //xy=557.8095550537109,571.9046897888184
-AudioAnalyzeFFT256       USBscope;       //xy=560.5238571166992,184.1904640197754
-AudioSynthWaveformSine   BFO;          //xy=626,886
-AudioEffectMultiply      Second_mixer;      //xy=634.7499771118164,762.7500019073486
-AudioAnalyzePeak         peak2;          //xy=730.666690826416,452.3333683013916
-AudioFilterFIR           IF12r7;         //xy=733.4763412475586,358.6190776824951
-AudioAnalyzePeak         peak1;          //xy=736.1905746459961,299.6190242767334
-AudioMixer4              ModeSelect;      //xy=825.8095092773438,770.1429214477539
-AudioEffectRectifier     AMdet;          //xy=876.3334197998047,359.2855930328369
-AudioFilterBiquad        BandWidth;      //xy=985.0477104187012,768.8571186065674
-AudioAnalyzeRMS          rms1;           //xy=1187.7142181396484,685.7618789672852
-AudioOutputI2S           LineOut;        //xy=1188.4285888671875,765.8572845458984
-AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
-AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
-AudioConnection          patchCord3(H45minus, 0, SSBselect, 2);
-AudioConnection          patchCord4(PhaseI, H90plus);
-#ifdef USE_USB_AUDIO
-AudioConnection          patchCord5(PhaseI, 0, usb1, 0);
-AudioConnection          patchCord9(PhaseQ, 0, usb1, 1);
-#endif
-AudioConnection          patchCord6(PhaseI, H45plus);
-AudioConnection          patchCord7(H45plus, 0, SSBselect, 1);
-AudioConnection          patchCord8(PhaseQ, H00minus);
-AudioConnection          patchCord10(PhaseQ, H45minus);
+AudioConnection          patchCord8(PhaseQ, Q_filter);
+AudioConnection          patchCord5(PhaseI, I_filter);
+AudioConnection          patchCord6(PhaseQ, H00minus);
+AudioConnection          patchCord9(I_filter, 0, I_mixer, 0);
+AudioConnection          patchCord10(Q_filter, 0, Q_mixer, 0);
 AudioConnection          patchCord11(H90plus, 0, USBmixer, 1);
 AudioConnection          patchCord12(H90plus, 0, LSBmixer, 1);
 AudioConnection          patchCord13(H00minus, 0, USBmixer, 2);
 AudioConnection          patchCord14(H00minus, 0, LSBmixer, 2);
-AudioConnection          patchCord15(SSBselect, 0, Second_mixer, 0);
-AudioConnection          patchCord16(USBmixer, USBscope);
-AudioConnection          patchCord17(USBmixer, peak1);
-AudioConnection          patchCord18(USBmixer, IF12r7);
-AudioConnection          patchCord19(LSBmixer, LSBscope);
-AudioConnection          patchCord20(LSBmixer, peak2);
-AudioConnection          patchCord21(BFO, 0, Second_mixer, 1);
-AudioConnection          patchCord22(Second_mixer, 0, ModeSelect, 1);
-AudioConnection          patchCord23(IF12r7, AMdet);
-AudioConnection          patchCord24(ModeSelect, BandWidth);
-AudioConnection          patchCord25(AMdet, 0, ModeSelect, 0);
-AudioConnection          patchCord26(BandWidth, rms1);
-AudioConnection          patchCord27(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord28(BandWidth, 0, LineOut, 1);
+AudioConnection          patchCord15(cosBFO, 0, I_mixer, 1);
+AudioConnection          patchCord16(sinBFO, 0, Q_mixer, 1);
+AudioConnection          patchCord17(I_mixer, 0, SSBselect, 1);
+AudioConnection          patchCord18(Q_mixer, 0, SSBselect, 2);
+AudioConnection          patchCord19(USBmixer, USBscope);
+AudioConnection          patchCord20(USBmixer, peak1);
+AudioConnection          patchCord21(USBmixer, IF12r7);
+AudioConnection          patchCord22(LSBmixer, LSBscope);
+AudioConnection          patchCord23(LSBmixer, peak2);
+AudioConnection          patchCord24(SSBselect, rms1);
+AudioConnection          patchCord25(SSBselect, 0, LineOut, 0);
+AudioConnection          patchCord26(SSBselect, 0, LineOut, 1);
+AudioConnection          patchCord27(IF12r7, AMdet);
+AudioConnection          patchCord28(AMdet, 0, SSBselect, 0);
 AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
 // GUItool: end automatically generated code
-*/
 
-// we have 65k colors.  How to pick one? Limit to just 16.
+
+// 16 EGA colors from the possible 65k colors. 
          //  4bpp pallett  0-3, 4-7, 8-11, 12-15
 const uint16_t EGA[] = { 
          ILI9341_BLACK,    ILI9341_NAVY,    ILI9341_DARKGREEN, ILI9341_DARKCYAN,
@@ -241,13 +121,6 @@ const uint16_t EGA[] = {
          }; 
 uint16_t GRAY[16];
 
-// waterfall pallet, try just sliding bits
-//const uint16_t WF[] = {
-//         0b0000000000000000, 0b0000000000000001,0b0000000000000011,0b0000000000000111,
-//         0b0000000000001111, 0b0000000000011111,0b0000000000111111,0b0000000001111111,
-//         0b0000000011111111, 0b0000000111111111,0b0000001111111111,0b0000011111111111,
-//         0b0000111111111111, 0b0001111111111111,0b0011111111111111,0b0111111111111111,          
-//         };
 const uint16_t WF[] = {
          0b0000000000000000, 0b0000000000000001,0b0000000000000011,0b0000000000000111,
          0b0000000000011111, 0b0000000001111110,0b0000000111111000,0b0000011111100000,
@@ -346,21 +219,21 @@ struct menu mode_menu_data = {
    2
 };
 
-const char w_6k[] =     " 6000";
-const char w_4k[] =     " 4500";
 const char w_3600[] =   " 3600";
-const char w_3300[] =   " 3300";
+const char w_3400[] =   " 3400";
+const char w_3200[] =   " 3200";
 const char w_3000[] =   " 3000";
-const char w_2700[] =   " 2700";
+const char w_2800[] =   " 2800";
+const char w_2600[] =   " 2600";
 const char w_2400[] =   " 2400";
-const char w_1100[] =   " 1100";
+const char w_1000[] =   " 1000";
 struct menu band_width_menu_data = {
    { "Band Width" },
-   { w_6k, w_4k,  w_3600, w_3300, w_3000, w_2700, w_2400, w_1100 },
-   { 6000, 4500, 3600, 3300, 3000, 2700, 2400, 1100 },
+   { w_3600, w_3400,  w_3200, w_3000, w_2800, w_2600, w_2400, w_1000 },
+   { 3600, 3400, 3200, 3000, 2800, 2600, 2400, 1000 },
    48,
    ILI9341_PURPLE,
-   4
+   3
 };
 
 uint8_t ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
@@ -373,7 +246,7 @@ int16_t  PhaseQfir[2] = { 32767, 0 };
 
 int peak_atn = 15;        // auto attenuation of line_input, atn will be peak_atn - 15
 float agc_gain = 1.0;
-int mux_selected;
+//int mux_selected;
 float svalue;
 float rms_value;
 
@@ -383,8 +256,8 @@ char tbuf[TBUFSIZE];            // power of two buffer
 int  t_in, t_out;
 uint8_t tx_in_progress;
 
-// Audio IF
-int bfo = 8800;                 // bfo somewhere near 7700 1st filter, 8800 2nd 80 tap filter
+// Weaver folding bfo, set to 1/2 the bandwidth
+int bfo = 1500;
 
 /********************************************************************************/
 
@@ -436,37 +309,27 @@ int i,j,r,g,b;
   codec.lineOutLevel(30);                   // 13 to 31 with 13 the loudest. 3.16v to 1.16v
   //codec.adcHighPassFilterDisable();         // less noise ? don't notice any change
   //codec.adcHighPassFilterFreeze();          // try this one
-                                             
-//  H45plus.begin(h45p,HILBERT_IF);          // SSB 3.75k wide at IF 11k
-//  H45minus.begin(h45m,HILBERT_IF);
+
+  // bandscope processing                                           
   H90plus.begin(h90p,HILBERT_AM);          // Bandscope and AM detector hilbert
   H00minus.begin(h00m,HILBERT_AM);
   PhaseI.begin(PhaseIfir,2);               // Phasing change delays if needed
   PhaseQ.begin(PhaseQfir,2);
-  SSBroof.begin(RoofFir,80);               // 40 taps for the previous version
   USBmixer.gain(1,1.0);                    // add signals get USB.   
   USBmixer.gain(2,1.0);
   LSBmixer.gain(1,1.0);                    // sub signals get LSB
   LSBmixer.gain(2,-1.0);
 
-  // the BFO inverts the audio, so get USB audio from the LSB selection, LSB from USB selection
-  SSBselect.gain(1,1.0);
-  SSBselect.gain(2,0.0);                   // Select USB, listen to LSB
-  mux_selected = 2;              // !!! what does this do now
-
-  BFO.amplitude(1.0);                      // turn on the bfo
-  BFO.frequency(bfo);                     // put on upper band edge of the Roofing filter
-                                           // adjust for best sound vs image rejection
-                                           // no commands for the 2nd mixer
-  ModeSelect.gain(0,0.0);                  // turn off AM
-  ModeSelect.gain(1,1.0);                  // turn on SSB,CW audio path
-
-  BandWidth.setLowpass(0,3000,0.67);       // use these or actual butterworth Q's
-  BandWidth.setLowpass(1,3000,1.10);
-  BandWidth.setLowpass(2,3000,0.707);
-  BandWidth.setLowpass(3,3000,1.00);       // 4 IIR lowpass cascade
+  // weaver audio
+  SSBselect.gain(0,0.0);                   // AM off
+  SSBselect.gain(1,1.0);                   // !!! gains will be agc_gain or -agc_gain
+  SSBselect.gain(2,1.0);                   // -1 for the other sideband
+  //mux_selected = 2;              // !!! what does this do now
 
   IF12r7.begin(AM12r7fir,30);              // AM filter at 12.7k audio IF frequency
+
+  set_Weaver_bandwidth(3000);
+  
   AudioInterrupts();
 
   USBscope.averageTogether(50);            // or 40 for faster waterfall
@@ -474,6 +337,34 @@ int i,j,r,g,b;
 
 }
 
+
+
+void set_Weaver_bandwidth(int bandwidth){
+  
+  bfo = bandwidth/2;                     // weaver audio folding at 1/2 bandwidth
+  I_filter.setLowpass(0,bfo,0.51);       // filters are set to 1/2 the desired audio bandwidth
+  I_filter.setLowpass(1,bfo,0.60);       // with Butterworth Q's for 4 cascade
+  I_filter.setLowpass(2,bfo,0.90);
+  I_filter.setLowpass(3,bfo,2.56);
+
+  Q_filter.setLowpass(0,bfo,0.51);
+  Q_filter.setLowpass(1,bfo,0.60);
+  Q_filter.setLowpass(2,bfo,0.90);
+  Q_filter.setLowpass(3,bfo,2.56);
+
+  AudioNoInterrupts();                     // need so cos and sin start with correct phase
+
+    // complex BFO
+  cosBFO.amplitude(0.9);                   // what is correct bfo level, sig vs overload in adder
+  cosBFO.frequency(bfo);
+  cosBFO.phase(90);                        // cosine 
+  sinBFO.amplitude(0.9);
+  sinBFO.frequency(bfo);
+  sinBFO.phase(0);                         // sine
+
+  AudioInterrupts();
+  
+}
 
 
 // touch the screen top,middle,bottom to bring up different menus.  Assign menu_dispatch.
@@ -510,8 +401,8 @@ int current;
    current = mode_menu_data.current;
    selection = touch_decode( t, mode_menu_data.y_size );
    if( mode_menu_data.param[selection] != -1 ){
-      if( selection != 7 ) mode_menu_data.current = selection;  // added phasing to this menu
-      selection = mode_menu_data.param[selection];              // perhaps it should be elsewhere
+      if( selection != 7 ) mode_menu_data.current = selection;
+      selection = mode_menu_data.param[selection];
 
       if( selection != 7 ) vfo_mode &= 0x0f;    // save the qcx mode flags, clear the sdr mode flags
       switch( selection ){
@@ -520,45 +411,37 @@ int current;
                  digitalWriteFast(QCX_MUTE,LOW);          // select qcx audio      
                  SSBselect.gain(1,0.0);                   // mute LSB,USB,AM
                  SSBselect.gain(2,0.0);
-                 ModeSelect.gain(0,0.0);
-                 ModeSelect.gain(1,0.0);
-                 mux_selected = 0;
+                 SSBselect.gain(0,0.0);
         break;
-        case 1:  vfo_mode |= VFO_CW;
+        case 1:  vfo_mode |= VFO_CW;                      // SDR CW mode on USB
                  digitalWriteFast(QCX_MUTE,HIGH);                 
-                 ModeSelect.gain(1,agc_gain);              // turn on SSB
-                 ModeSelect.gain(0,0.0);                   // turn off AM
-                 SSBselect.gain(1,0.0);
-                 SSBselect.gain(2,1.0);                   // USB audio
-                 mux_selected = 1;
+                 SSBselect.gain(0,0.0);                   // turn off AM
+                 SSBselect.gain(1,agc_gain);
+                 SSBselect.gain(2,-agc_gain);             // USB audio
         break;
         case 2:  vfo_mode |= VFO_LSB;  
                  digitalWriteFast(QCX_MUTE,HIGH);
-                 ModeSelect.gain(1,agc_gain);              // SSB audio
-                 ModeSelect.gain(0,0.0);
-                 SSBselect.gain(1,1.0);
-                 SSBselect.gain(2,0.0);                    // usb to listen to LSB audio
-                 mux_selected = 2;
+                 SSBselect.gain(0,0.0);
+                 SSBselect.gain(1,agc_gain);
+                 SSBselect.gain(2,agc_gain); 
         break;
         case 3:  vfo_mode |= VFO_USB;
                  digitalWriteFast(QCX_MUTE,HIGH);
-                 ModeSelect.gain(1,agc_gain);
-                 ModeSelect.gain(0,0.0);                   // AM off
-                 SSBselect.gain(1,0.0);
-                 SSBselect.gain(2,1.0);
-                 mux_selected = 1;
+                 SSBselect.gain(0,0.0);                   // AM off
+                 SSBselect.gain(1,agc_gain);
+                 SSBselect.gain(2,-agc_gain);
         break;
         case 4:  vfo_mode |= VFO_AM;
                  digitalWriteFast(QCX_MUTE,HIGH);
-                 ModeSelect.gain(1,0.0);
-                 ModeSelect.gain(0,agc_gain);             // AM on
-                 mux_selected = 3;
+                 SSBselect.gain(0,agc_gain);               // AM on
+                 SSBselect.gain(1,0.0);
+                 SSBselect.gain(2,0.0);
         break;
         case 7:  PhaseChange(1);  break;                  // phasing correction    
       }
      
    }
-   qsy_mode( current, mode_menu_data.current );   
+   qsy_mode( current, mode_menu_data.current, bfo, bfo );   
    menu_cleanup(); 
 }
 
@@ -574,16 +457,17 @@ void menu_cleanup(){
 
 void band_width_menu( int32_t t ){
 int sel;
+int old_bfo;
 
+   if( vfo_mode & VFO_AM ) return;              // am bandwidth is fixed
+
+   old_bfo = bfo;
    sel = touch_decode( t, band_width_menu_data.y_size );
    if( band_width_menu_data.param[sel] != -1 ){
       band_width_menu_data.current = sel;
       sel = band_width_menu_data.param[sel];
-     //Serial.println(sel);                    
-      BandWidth.setLowpass(0,sel,0.51);       // 0.51  butterworth constants
-      BandWidth.setLowpass(1,sel,0.60);       // 0.60
-      BandWidth.setLowpass(2,sel,0.90);       // 0.90
-      BandWidth.setLowpass(3,sel,2.56);       // 2.56
+      set_Weaver_bandwidth(sel);
+      qsy_mode( 0, 0, old_bfo, bfo );  // tuning change needed
    }
    
    menu_cleanup();
@@ -719,31 +603,42 @@ int32_t t;
 }
 
 // change the qcx frequency when changing modes to remain on the same frequency
-// bfo offset changes
-void qsy_mode(int old_mode, int new_mode ){
+// change the frequency when bandwidth changes for Weaver demod.
+void qsy_mode(int old_mode, int new_mode, int old_bfo, int new_bfo ){
 int32_t freq;
 char buf[33];
 char buf2[33];
-
-   if( old_mode == new_mode ) return;
    
    freq = vfo_a;
    strcpy(buf,"FA000");
    if( vfo_mode & VFO_B ) freq = vfo_b, buf[1] = 'B';
 
-   switch( old_mode ){                                  // remove current offsets
-      case 0:  freq += 700;  break;                     // qsx mode
-      case 1:  freq -= (bfo-700);  break;               // cw sdr
-      case 2:  freq += bfo;  break;                     // lsb
-      case 3:  freq -= bfo;  break;                     // usb
-      case 4:  freq += 12700;  break;                       // am filter center
+   if( old_mode != new_mode ){
+      switch( old_mode ){                                  // remove current offsets
+         case 0:  freq += 700;  break;                     // qsx mode
+         case 1:  freq -= (bfo-700);  break;               // cw sdr
+         case 2:  freq += bfo;  break;                     // lsb
+         case 3:  freq -= bfo;  break;                     // usb
+         case 4:  freq += 12700;  break;                       // am filter center
+      }
+      switch( new_mode ){
+         case 0:  freq -= 700;  break;
+         case 1:  freq += (bfo-700);  break;
+         case 2:  freq -= bfo;  break;                     // lsb
+         case 3:  freq += bfo;  break;                     // usb
+         case 4:  freq -= 12700;   break;
+      }
    }
-   switch( new_mode ){
-      case 0:  freq -= 700;  break;
-      case 1:  freq += (bfo-700);  break;
-      case 2:  freq -= bfo;  break;                     // lsb
-      case 3:  freq += bfo;  break;                     // usb
-      case 4:  freq -= 12700;   break;
+
+   if( old_bfo != new_bfo ){                            // bandwidth change
+     if( vfo_mode & VFO_LSB ){
+       freq += old_bfo;
+       freq -= new_bfo;
+     }
+     else{
+       freq -= old_bfo;
+       freq += new_bfo;
+     }
    }
  
    if( freq < 10000000 ) strcat(buf,"0");               //add a zero
@@ -752,11 +647,12 @@ char buf2[33];
    strcat( buf,";");
    delay(300);                                          // wait any current command
    cat.print(buf);
-   cmd_tm = millis();                                   // delay future command
+   cmd_tm = millis();                                   // delay future commands, allow this one to process
 }
 
 // avoid overload.  This looks at 40khz of signal on USB and LSB so not a replacement for AGC
 // both sideband signals feed the bandscope even if not listened to
+// !!!should the select mux gain be increased to avoid desense on loud out of bandwidth signals
 void auto_atn(){           // lower front end gain if signals approach overload
 static uint32_t tm;        
 static int no_chg_cnt;     // slowly raise gain
@@ -814,9 +710,15 @@ int ch;
      agc_gain = agc_gain * AGC_SLOPE;
      agc_gain = 1.0 - agc_gain;     
      // SSBselect.gain(mux_selected,agc_gain);
-     if( vfo_mode & VFO_AM ) ModeSelect.gain(0,agc_gain);
-     else ModeSelect.gain(1,agc_gain);
+ //    if( vfo_mode & VFO_AM ) ModeSelect.gain(0,agc_gain);
+ //    else ModeSelect.gain(1,agc_gain);
        // Serial.println(agc_gain);
+     if( vfo_mode & VFO_AM ) SSBselect.gain(0,agc_gain);
+     else{
+        SSBselect.gain(1,agc_gain);
+        if( vfo_mode & VFO_LSB ) SSBselect.gain(2,agc_gain);
+        else SSBselect.gain(2,-agc_gain);
+     }
      if( screen_owner == DECODE ){
         tft.setTextSize(1);
         tft.setTextColor(EGA[14],0);
