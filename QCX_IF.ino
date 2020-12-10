@@ -30,6 +30,14 @@
  17      A3  
 
 
+Have decided to expand upon this version.  The general plan is when one chooses the QCX CW mode, you have 
+a QCX without any changes.  The SDR QCX will have changes.  The baseband and Weaver versions may or may not
+be updated with some of these features.  The Weaver version looks promising for different hardware.
+
+Change log:
+  Added a CW tuning indicator.
+  Lower the 1100 hz filter for CW work.  Trying a 800hz lowpass.
+  Adding a separate CW decoder for SDR cw mode.
  
  *******************************************************************************/
 
@@ -41,6 +49,7 @@
 #include <SPI.h>
 
 #include "hilbert_IF.h"
+#include "my_morse.h"           // morse and baudot tables
 
 #define QCX_MUTE 2              // pin 2 high mutes qcx audio
 
@@ -415,11 +424,11 @@ const char w_3300[] =   " 3300";
 const char w_3000[] =   " 3000";
 const char w_2700[] =   " 2700";
 const char w_2400[] =   " 2400";
-const char w_1100[] =   " 1100";
+const char w_1100[] =   " 800";
 struct menu band_width_menu_data = {
    { "Band Width" },
    { w_6k, w_4k,  w_3600, w_3300, w_3000, w_2700, w_2400, w_1100 },
-   { 6000, 4500, 3600, 3300, 3000, 2700, 2400, 1100 },
+   { 6000, 4500, 3600, 3300, 3000, 2700, 2400, 800 },
    48,
    ILI9341_PURPLE,
    4
@@ -447,6 +456,12 @@ uint8_t tx_in_progress;
 
 // Audio IF
 int bfo = 8800;                 // bfo somewhere near 7700 1st filter, 8800 2nd 80 tap filter
+
+// cw decode
+int cread_buf[16];
+int cread_indx;
+int dah_table[8];
+int dah_in;
 
 /********************************************************************************/
 
@@ -531,7 +546,7 @@ int i,j,r,g,b;
 
   IF12r7.begin(AM12r7fir,30);              // AM filter at 12.7k audio IF frequency
                                            // !!! we could turn this off when not used
-
+                                           
   tone600.frequency(600,6);                // try to get these to all run at 10ms rep rate
   tone700.frequency(700,7);
   tone800.frequency(800,8);
@@ -751,7 +766,7 @@ static int flip;
       else if( qu_flags & QUIF ) cat.print("IF;");
       else if( qu_flags & QUFB ) cat.print("FB;");
       else if( qu_flags & QUFA ) cat.print("FA;");
-      else if( qu_flags & QUTB && screen_owner == DECODE && (vfo_mode & VFO_CW ) ) cat.print("TB;");
+      else if( qu_flags & QUTB && screen_owner == DECODE && (mode_menu_data.current == 0 ) ) cat.print("TB;");
       else{
           switch(c_state){                         // poll radio round robin for missed packet recovery
               case 0: case 2: case 4: case 6: case 8:
@@ -762,7 +777,7 @@ static int flip;
               case 7: if( screen_owner == DECODE && (vfo_mode & VFO_CW ) ) cat.print("TB1;");
                       //  else cat.print("TB0;");  keep enabled but don't get the info unless CW mode
                       break;   // enable/disable decode flag
-              case 9: if( screen_owner == DECODE && (vfo_mode & VFO_CW ) ) cat.print("TB;");
+              case 9: if( screen_owner == DECODE && (mode_menu_data.current == 0 ) ) cat.print("TB;");
                       break;        
          }
          ++c_state;
@@ -784,37 +799,33 @@ static int flip;
       (*menu_dispatch)(t);    // off to whoever owns the touchscreen
    }
 
-   if( cw_tune() ){        // preference to cw_tune instead of waterfall
+   if( cw_tune() ){                   // preference to cw_tune instead of waterfall
       flip ^= 1;
-      if( flip ) USBwaterfall();
+      if( flip ) USBwaterfall();      // run waterfall when we know new tune data is 10ms away 
       else LSBwaterfall();
    }
    
    auto_atn();             // front end gain reduction if rcv very loud signals
    agc();
 
-   //cw_tune();              // cw_tuning indicator
-
+   if( mode_menu_data.current == 1 ) code_read();   // run SDR cw decoder
+   
    // balance_schmoo();    // !!! testing
 }
 
 
-// indicator to show when tuned spot on 700 hz
-// !!! maybe keep a running average of the spacing tones to avoid noise?
+// indicator to show when tuned spot on 700 hz.  1st steps for another cw decoder.
 int cw_tune(){
-static float t6, t7, t8;
-static float rav;
-float av, f, t;
-static int loc;
-int det;
-int new_loc, c;
-static int count;
+static float t6, t7, t8;        // tone results
+static float rav;               // running average of the min buckets
+float av, f, t;                 // average of min buckets, meter force, max tone
+static int loc;                 // location of the tune meter needle
+int det;                        // cw mark space detect
+int new_loc, c;                 // raw new meter needle location, color of needle changes mark/space
+static int count;               // mark,space counts
 
 // debug
-static uint32_t  tm;      // verify timing
-
-//Serial.println( millis() - tm );     // loop time ok
-//tm = millis();
+// static uint32_t  tm;      // verify timing
    
    if( tone700.available() == 0 ) return 0;      // should run at 10ms rate
   // if( tone600.available() == 0 ) return;
@@ -823,16 +834,9 @@ static uint32_t  tm;      // verify timing
    t8 = tone800.read();
    t6 = tone600.read();
 
- //Serial.println( millis() - tm );     // (get 1 to 25 very strange)
+ //Serial.println( millis() - tm );     // was (get 1 to 25 very strange)
  //  tm = millis();                    // get 8 to 12 now with loop preference change
-                                     // which maybe makes sense as the audio block is 3ms of audio
-
-//   t7 = 2.0 * t7 + tone700.read();
-//   t8 = 2.0 * t8 + tone800.read();
-//   t6 = 2.0 * t6 + tone600.read();
-  // t7 /= 3;
-  // t6 /= 3;
-  // t8 /= 3;
+                                      // which maybe makes sense as the audio block is 3ms of audio
 
 // perhaps we should see what the signals are before getting too carried away.  Seems noisy.
 //  ++count;
@@ -847,41 +851,40 @@ static uint32_t  tm;      // verify timing
    
    if( t7 > t6 && t7 > t8 ){                   // desired case
        av = ( t6 + t8 )/2;
-       //if( t7 > ( 3.0 * av) ) ++det;
        t = t7;
        f = ( t8 - t6 )/av;
    }
    if( t6 > t7 && t6 > t8 ){                   // tuned low
        av = ( t7 + t8 )/2;
-       //if( t6 > ( 3.0 * av) ) ++det;
        t = t6;
        f = ( av - t6 )/av;
    }
    if( t8 > t7 && t8 > t6 ){                   // tuned high
        av = ( t6 + t7 )/2;
-       //if( t8 > ( 3.0 * av) ) ++det;
        t = t8;
        f = ( t8 - av )/av;
    }
 
-   rav = 7.0 * rav + av;
-   rav /= 8.0;
+   rav = 15.0 * rav + av;
+   rav /= 16.0;
 
-   if( t > 3.0 * rav ){       // marking
-      det = 1;
-      if( count < -2 ){
-         Serial.write(' '); Serial.println(count);
+   det = ( t > 2.9 * rav ) ? 1 : 0;       //2.0 - 3.0  noise to ok
+   det = cw_denoise( det );
+
+   if( det ){                // marking
+      if( count > 0 ){
+         if( count < 99 ) storecount(count);
          count = 0;
       }
-      ++count;
+      --count;
    }
    else{                     // spacing
-      det = 0;
-      if( count > 2 ){
-        Serial.print(count); Serial.write(' ');
+      if( count < 0 ){
+        storecount(count);
         count = 0; 
       }
-      --count;
+      ++count;
+      if( count == 99 ) storecount(count);  // one second no signal
    }
    
    new_loc = 15 * f;
@@ -894,6 +897,8 @@ static uint32_t  tm;      // verify timing
    }
    else c = EGA[12];
 
+// !!! inhibit these writes if position and color are same as last time
+// !!! and consider only showing when in cw sdr mode
 // void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color);
    tft.drawFastVLine(290+loc-2,40,12,0);    // erase like a sprite
    tft.drawFastVLine(290+loc-1,40,12,c);
@@ -901,8 +906,177 @@ static uint32_t  tm;      // verify timing
    tft.drawFastVLine(290+loc+1,40,12,c);
    tft.drawFastVLine(290+loc+2,40,12,0);
 
-   return 1;
+   return 1;              // ok to run time consuming waterfall now
 }
+
+// slide some bits around to remove 1 reversal of mark space
+int cw_denoise( int m ){
+static int val;
+
+   if( m ){
+      val <<= 1;
+      val |= 1;
+   }
+   else val >>= 1;
+
+   val &= 7;
+   if( m ) return val & 4;      // need 3 marks in a row to return true
+   else return val & 2;         // 1 extra mark returned when spacing
+                                // so min mark count we see is -2 if this works correctly
+                                // this shortens mark count by 1 which may be ok as
+                                // the tone detect seems to stretch the tone present time
+}
+
+// store mark space counts for cw decode
+void storecount( int count ){
+
+     cread_buf[cread_indx++] = count;
+     cread_indx &= 15;
+
+     if( count < 0 ){      // save dah counts
+        count = -count;
+        if( count >= 12 ){
+          dah_table[dah_in++] = count;
+          dah_in &= 7;
+        }
+     }
+}
+
+void shuffle_down( int count ){    /* consume the stored code read counts */
+int i;
+
+  for( i= count; i < cread_indx; ++i ){
+    cread_buf[i-count] = cread_buf[i];
+  }
+  
+  cread_indx -= count;
+  cread_indx &= 15;     // just in case out of sync  
+}
+
+
+int code_read_scan(int slice){  /* find a letter space */
+int ls, i;
+
+/* scan for a letter space */
+   ls = -1;
+   for( i= 0; i < cread_indx; ++i ){
+      if( cread_buf[i] > slice ){
+        ls = i;
+        break;
+      }
+   }
+   return ls;   
+}
+
+
+unsigned char morse_lookup( int ls, int slicer){
+unsigned char m_ch, ch;
+int i,elcount;
+
+   /* form morse in morse table format */
+   m_ch= 0;  elcount= 1;  ch= 0;
+   for( i = 0; i <= ls; ++i ){
+     if( cread_buf[i] > 0 ) continue;   /* skip the spaces */
+     if( cread_buf[i] < -slicer ) m_ch |= 1;
+     m_ch <<= 1;
+     ++elcount;
+   }
+   m_ch |= 1;
+   /* left align */
+   while( elcount++ < 8 ) m_ch <<= 1;
+
+   /* look up in table */
+   for( i = 0; i < 47; ++i ){
+      if( m_ch == morse[i] ){
+        ch = i+',';
+        break;
+      }
+   }
+
+   return ch;  
+}
+
+// routines from my TenTec Rebel code
+void code_read(){  /* convert the stored mark space counts to a letter on the screen */
+int slicer;
+int i;
+unsigned char m_ch;
+int ls,force;
+static int wt;    /* heavy weighting will mess up the algorithm, so this compensation factor */
+static int singles;
+static int farns,ch_count;
+
+   if( cread_indx < 2 ) return;    // need at least one mark and one space in order to decode something
+   if( screen_owner != DECODE ) return; 
+   
+   /* find slicer from dah table */
+   slicer= 0;   force= 0;
+   for( i = 0; i < 8; ++i ){
+     slicer += dah_table[i];
+   }
+   slicer >>= 4;   /* divide by 8 and take half the value */
+
+   ls = code_read_scan(slicer + wt);
+   
+   if( ls == -1 && cread_indx == 15 ){   // need to force a decode
+      for(i= 1; i < 30; ++i ){
+        ls= code_read_scan(slicer + wt - i);
+        if( ls >= 0 ) break;
+      } 
+      --wt;    /* compensate for short letter spaces */
+      force= 1;
+   }
+   
+   if( ls == -1 ) return;
+   
+   m_ch = morse_lookup( ls, slicer );
+   
+   /* are we getting just E and T */
+   if( m_ch == 'E' || m_ch == 'T' ){   /* less weight compensation needed */
+      if( ++singles == 4 ){
+         ++wt;
+         singles = 0;
+      }
+   }
+   else if( m_ch ) singles = 0;   
+ 
+   /* are we getting just e,i,s,h,5 ?   High speed limit reached.  Attempt to receive above 30 wpm */
+  // if( m_ch > 0 && ( m_ch == 'S' || m_ch == 'H' || m_ch == 'I' || m_ch == '5' )) ++shi5;
+  // else if( m_ch > 0 && m_ch != 'E' ) --shi5;   // E could be just noise so ignore
+  // if( shi5 < 0 ) shi5 = 0;
+ 
+   /* if no char match, see if can get a different decode */
+   if( m_ch == 0 && force == 0 ){
+     //if( ( slicer + wt ) < 10 ) ls = code_read_scan( slicer + wt -1 );
+     //else ls = code_read_scan( slicer + wt -2 );
+     ls = code_read_scan( slicer + wt - ( slicer >> 2 ) );
+     m_ch = morse_lookup( ls, slicer );
+     if( m_ch > 64 ) m_ch += 32;       // lower case for this algorithm
+     //if( m_ch ) --wt;     this doesn't seem to be a good idea
+   }
+ 
+   if( m_ch ){   /* found something so print it */
+      ++ch_count;
+      decode_print(m_ch);
+      if( cread_buf[ls] > 3*slicer + farns ){   // check for word space
+        if( ch_count == 1 ) ++farns;    // single characters, no words printed
+        ch_count= 0;
+        decode_print(' ');
+      }
+   }
+     
+   if( ls < 0 ) ls = 0;   // check if something wrong just in case  
+   shuffle_down( ls+1 );  
+
+   /* bounds for weight */
+   if( wt > slicer ) wt = slicer;
+   if( wt < -(slicer >> 1)) wt= -(slicer >> 1);
+   
+   if( ch_count > 10 ) --farns;
+   
+}
+
+
 
 // change the qcx frequency when changing modes to remain on the same frequency
 // bfo offset changes
@@ -1552,6 +1726,21 @@ char c;
      tft.write(c);
      ++dpos;
   }
+}
+
+// replicate above for the SDR cw decoder
+void decode_print( char c ){
+
+  tft.setTextColor(EGA[14],0);
+  tft.setTextSize(2);
+
+     if( dpos >= 25 ) scroll_dtext();                      // scroll needed
+     // save each char in buffer and print to the screen
+     dtext[dline][dpos] = c;
+     tft.setCursor( D_LEFT + 12*dpos, D_BOTTOM - D_SIZE );
+     tft.write(c);
+     ++dpos;
+  
 }
 
 
