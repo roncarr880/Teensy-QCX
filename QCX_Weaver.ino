@@ -45,12 +45,74 @@
 
 #define QCX_MUTE 2              // pin 2 high mutes qcx audio
 
-// #define USE_USB_AUDIO        // not needed for self contained radio but works really slick
+ #define USE_USB_AUDIO        // not needed for self contained radio but works really slick
                                 // with HDSDR.  Can include later.
 
 // peak1 and peak2 used to avoid exceeding int16 size in the usb,lsb adders.
 
+// GUItool: begin automatically generated code
+AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
+AudioFilterFIR           PhaseI;           //xy=206,292
+AudioFilterFIR           PhaseQ;           //xy=212,458
+AudioFilterBiquad        I_filter;        //xy=253.3333333333333,659.9999999999999
+AudioFilterBiquad        Q_filter;        //xy=254.16668701171875,799.5833435058594
+#ifdef USE_USB_AUDIO
+AudioOutputUSB           usb1;           //xy=361.66668701171875,369
+#endif
+AudioFilterFIR           H90plus;        //xy=364.66668701171875,293.3333435058594
+AudioFilterFIR           H00minus;       //xy=375.66668701171875,456.3333740234375
+AudioSynthWaveformSine   cosBFO;          //xy=426.66666666666663,739.9999999999999
+AudioSynthWaveformSine   sinBFO;          //xy=426.6666946411133,888.3332710266113
+AudioEffectMultiply      I_mixer;      //xy=514.9999999999999,668.3333333333333
+AudioEffectMultiply      Q_mixer;      //xy=518.3333930969238,806.6667461395264
+AudioMixer4              USBmixer;       //xy=546.6666870117188,299.3333435058594
+AudioMixer4              LSBmixer;       //xy=549.6666870117188,450.3333740234375
+AudioAnalyzeFFT256       LSBscope;       //xy=557.8095550537109,571.9046897888184
+AudioAnalyzeFFT256       USBscope;       //xy=560.5238571166992,184.1904640197754
+AudioMixer4              SSBselect;         //xy=714.9999961853027,731.6667022705078
+AudioAnalyzePeak         peak2;          //xy=730.666690826416,452.3333683013916
+AudioFilterFIR           IF12r7;         //xy=733.4763412475586,358.6190776824951
+AudioAnalyzePeak         peak1;          //xy=736.1905746459961,299.6190242767334
+AudioEffectRectifier     AMdet;          //xy=876.3334197998047,359.2855930328369
+AudioAnalyzeRMS          rms1;           //xy=907.7141952514648,659.0952682495117
+AudioFilterBiquad        Notch;        //xy=916,731
+AudioOutputI2S           LineOut;        //xy=1101.76171875,729.8573608398438
+AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
+AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
+AudioConnection          patchCord3(PhaseI, H90plus);
+#ifdef USE_USB_AUDIO
+AudioConnection          patchCord4(PhaseI, 0, usb1, 0);
+AudioConnection          patchCord7(PhaseQ, 0, usb1, 1);
+#endif
+AudioConnection          patchCord5(PhaseI, I_filter);
+AudioConnection          patchCord6(PhaseQ, H00minus);
+AudioConnection          patchCord8(PhaseQ, Q_filter);
+AudioConnection          patchCord9(I_filter, 0, I_mixer, 0);
+AudioConnection          patchCord10(Q_filter, 0, Q_mixer, 0);
+AudioConnection          patchCord11(H90plus, 0, USBmixer, 1);
+AudioConnection          patchCord12(H90plus, 0, LSBmixer, 1);
+AudioConnection          patchCord13(H00minus, 0, USBmixer, 2);
+AudioConnection          patchCord14(H00minus, 0, LSBmixer, 2);
+AudioConnection          patchCord15(cosBFO, 0, I_mixer, 1);
+AudioConnection          patchCord16(sinBFO, 0, Q_mixer, 1);
+AudioConnection          patchCord17(I_mixer, 0, SSBselect, 1);
+AudioConnection          patchCord18(Q_mixer, 0, SSBselect, 2);
+AudioConnection          patchCord19(USBmixer, USBscope);
+AudioConnection          patchCord20(USBmixer, peak1);
+AudioConnection          patchCord21(USBmixer, IF12r7);
+AudioConnection          patchCord22(LSBmixer, LSBscope);
+AudioConnection          patchCord23(LSBmixer, peak2);
+AudioConnection          patchCord24(SSBselect, rms1);
+AudioConnection          patchCord25(SSBselect, Notch);
+AudioConnection          patchCord26(IF12r7, AMdet);
+AudioConnection          patchCord27(AMdet, 0, SSBselect, 0);
+AudioConnection          patchCord28(Notch, 0, LineOut, 0);
+AudioConnection          patchCord29(Notch, 0, LineOut, 1);
+AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
+// GUItool: end automatically generated code
 
+
+/***************
 // GUItool: begin automatically generated code
 AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
 AudioFilterFIR           PhaseI;           //xy=206,292
@@ -109,7 +171,7 @@ AudioConnection          patchCord27(IF12r7, AMdet);
 AudioConnection          patchCord28(AMdet, 0, SSBselect, 0);
 AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
 // GUItool: end automatically generated code
-
+***************/
 
 // 16 EGA colors from the possible 65k colors. 
          //  4bpp pallett  0-3, 4-7, 8-11, 12-15
@@ -351,6 +413,9 @@ void set_Weaver_bandwidth(int bandwidth){
   Q_filter.setLowpass(1,bfo,0.60);
   Q_filter.setLowpass(2,bfo,0.90);
   Q_filter.setLowpass(3,bfo,2.56);
+
+  Notch.setLowpass(0,5000,0.707);
+  //Notch.setNotch(1,bfo,10);
 
   AudioNoInterrupts();                     // need so cos and sin start with correct phase
 
