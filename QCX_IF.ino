@@ -1,8 +1,8 @@
 /*
  *   QCX with Teensy 3.6, Audio shield, and ILI9341 touchscreen added on QCX Dev Board.
  *     IF version
-         Runs the baseband version for the band scope and AM detector
-         and runs a 11 khz IF for SSB and CW
+         Runs the baseband version for the band scope, CW,  and AM detector
+         and runs a 6.6 khz IF for SSB
 
  *   A note:  putting capacitors in C4 C7 caused the front end to pick up screen draw noise.  Line In is
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
@@ -12,7 +12,7 @@
  *   See if TX works and power level ok.
  *   make a hole in the top case
  *   Add a USB external wire for usb audio
- *   CW, RTTY, PSK31 decoders - software only
+ *   RTTY, PSK31 decoders - software only
  *   Hellschrieber RX and TX
  *      
  *   
@@ -31,13 +31,14 @@
 
 
 Have decided to expand upon this version.  The general plan is when one chooses the QCX CW mode, you have 
-a QCX without any changes.  The SDR QCX will have changes.  The baseband and Weaver versions may or may not
+a QCX without any changes, enhancements are for SDR modes.  The baseband and Weaver versions may or may not
 be updated with some of these features.  The Weaver version looks promising for different hardware.
 
 Change log:
   Added a CW tuning indicator.
   Lower the 1100 hz filter for CW work.  Trying a 800hz lowpass.
-  Adding a separate CW decoder for SDR cw mode.
+  Adding a separate CW decoder for SDR CW mode.
+  !!! May move SDR CW away from the baseband although that complicates TX RX frequency netting.
  
  *******************************************************************************/
 
@@ -1087,7 +1088,8 @@ char buf[33];
 char buf2[33];
 
    if( old_mode == new_mode ) return;
-   if( old_mode < 2 && new_mode < 2 ) return;          // no tuning change needed CW to CW modes
+   // if( old_mode < 2 && new_mode < 2 ) return;          // no tuning change needed CW to CW modes
+   // this is what prevented the tune change when I tried 600hz cw tone
    
    freq = vfo_a;
    strcpy(buf,"FA000");
@@ -1179,8 +1181,8 @@ int ch;
      //if( vfo_mode & VFO_AM ) ModeSelect.gain(0,agc_gain);
      //else ModeSelect.gain(1,agc_gain);
        // Serial.println(agc_gain);
-     if( screen_owner == DECODE ){
-        tft.setTextSize(1);
+     if( screen_owner == DECODE ){           // maybe move this to vfo_mode_disp ?
+        tft.setTextSize(1);                  // maybe not as this changes often, why re-write all the info
         tft.setTextColor(EGA[14],0);
         tft.setCursor(262,114);  
         tft.print("Sig: ");
@@ -1225,19 +1227,19 @@ float ftemp;
             if( int(ftemp) == 99  ) tft.drawLine(x,y,x-1,y-6,EGA[15]);
             if( int(ftemp) == 75  ) tft.drawLine(x,y,x+1,y-6,EGA[15]);
             if( int(ftemp) == 60  ) tft.drawLine(x,y,x+2,y-6,EGA[15]);
-            tft.setTextColor(EGA[15],0);
-            tft.setTextSize(2);
-            tft.setCursor(25,ybase-90);
-            tft.write('1');
-            tft.setCursor(90,ybase-109);
-            tft.write('5');
-            tft.setCursor(156,ybase-115);
-            tft.write('9');
-            tft.setCursor(210,ybase-109);
-            tft.print("20");
-            tft.setCursor(250,ybase-100);
-            tft.print("40");
       }
+      tft.setTextColor(EGA[15],0);
+      tft.setTextSize(2);
+      tft.setCursor(25,ybase-90);
+      tft.write('1');
+      tft.setCursor(90,ybase-109);
+      tft.write('5');
+      tft.setCursor(156,ybase-115);
+      tft.write('9');
+      tft.setCursor(210,ybase-109);
+      tft.print("20");
+      tft.setCursor(250,ybase-100);
+      tft.print("40");
    }
 
    tvalue = rms_value/agc_gain;                // what the signal would be without the agc
@@ -1426,8 +1428,11 @@ int u,l,c,m;
    tft.setTextColor(EGA[4+r],0);
    tft.print("RIT");
     
-   tft.drawLine(0,61,640,60,EGA[4]);
-   tft.drawLine(0,62,640,61,EGA[4]);
+   tft.drawLine(0,61,319,61,EGA[4]);      
+   tft.drawLine(0,62,319,62,EGA[4]);
+   tft.drawLine(0,128,319,128,EGA[4]);
+   tft.drawLine(0,129,319,129,EGA[4]);
+  
 
    PhaseChange(0);           // just print current value
    tft.setCursor(262,78);    // print bandwidth ( spacing 12 pixel ? )
@@ -1903,11 +1908,11 @@ static uint8_t dashline;
 
     if( side == 4 && (vfo_mode & VFO_CW) ){
         ++dashline;
-        if( (dashline & 0xc) == 0xc ) return 8;     // CW tuning position
+        if( (dashline & 0xc) == 0xc ) return 10;     // CW tuning position
     }
     
     // show the ends of the waterfall
-    if( side == 127 || side == -127 ) return 8;
+    //if( side == 127 || side == -127 ) return 8;
     
     if( f < 0.0015 ) return 0;
     f -= 0.0015;            // set min signal level, noise just shows on waterfall 0015
