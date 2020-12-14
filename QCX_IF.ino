@@ -1,20 +1,22 @@
 /*
  *   QCX with Teensy 3.6, Audio shield, and ILI9341 touchscreen added on QCX Dev Board.
  *     IF version
-         Runs the baseband version for the band scope, CW,  and AM detector
+         Runs the baseband version for the band scope, and AM detector
          and runs a 6.6 khz IF for SSB
 
  *   A note:  putting capacitors in C4 C7 caused the front end to pick up screen draw noise.  Line In is
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
- * to work on  
+ * to work on
+ *   The way the overload protection works,  loud sigs on the bandscope desensitize the RX.
+ *      involves peak detectors, agc, smeter code 
+ *   Add a decoder menu. 
  *   Wire a fet to switch dit or dah to ground for hellschreiber
- *   See if TX works and power level ok.
  *   make a hole in the top case
- *   Add a USB external wire for usb audio
+ *   Add a USB external wire for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
  *   RTTY, PSK31 decoders - software only
  *   Hellschrieber RX and TX
- *      
+ *   Could disable Audio objects when they are not in use (example AM detector, Tone detectors, Roof filter)   
  *   
      
    Free pins when using audio board and display.
@@ -37,8 +39,15 @@ be updated with some of these features.  The Weaver version looks promising for 
 Change log:
   Added a CW tuning indicator.
   Lower the 1100 hz filter for CW work.  Trying a 800hz lowpass.
-  Adding a separate CW decoder for SDR CW mode.
-  !!! May move SDR CW away from the baseband although that complicates TX RX frequency netting.
+  Added a separate CW decoder for SDR CW mode.  Had some trouble with the audio library Tone objects
+     returning zero. Added a gain of 10 and some workaround code.
+  Move SDR CW mode to the IF to get away from the baseband noise.
+     Operate in a tracking split mode to keep TX freq correct.
+     Added RIT which moves the bfo when in CW SDR mode.  The QCX reports RIT changes in split mode
+     but does not implement with tuning changes.
+  Verified power out ok, tracks spec well, but expected better than 65% efficiency with class E.
+     1.2 watts at 9 volts, 50% eff.
+     2 watts at 10 volts, 60% eff.   2.5 watts at 11 volts.  3 watts at 12.  3.8 watts at 13. 
  
  *******************************************************************************/
 
@@ -54,20 +63,75 @@ Change log:
 
 #define QCX_MUTE 2              // pin 2 high mutes qcx audio
 
-// #define USE_USB_AUDIO        // not needed for self contained radio but works really slick
-                                // with HDSDR.  Can include later.
 
-// added peak2. peak1 and peak2 used to avoid exceeding int16 size in the usb,lsb adders.
+// peak1 and peak2 used to avoid exceeding int16 size in the usb,lsb adders.
 
-// IF version with baseband CW and CW tuning display for best decoding
 // GUItool: begin automatically generated code
 AudioInputI2S            IQ_in;          //xy=142,624
 AudioFilterFIR           PhaseI;         //xy=280,556
 AudioFilterFIR           PhaseQ;         //xy=286,722
 AudioMixer4              SSBselect;      //xy=325,1019
-#ifdef USE_USB_AUDIO
-AudioOutputUSB           usb1;           //xy=435,633
-#endif
+AudioFilterFIR           H90plus;        //xy=438,557
+AudioFilterFIR           H00minus;       //xy=449,720
+AudioFilterFIR           SSBroof;        //xy=499,1017
+AudioMixer4              USBmixer;       //xy=620,563
+AudioMixer4              LSBmixer;       //xy=623,714
+AudioAnalyzeFFT256       LSBscope;       //xy=631,835
+AudioAnalyzeFFT256       USBscope;       //xy=634,448
+AudioSynthWaveformSine   BFO;            //xy=700,1150
+AudioEffectMultiply      Second_mixer;   //xy=708,1026
+AudioAnalyzePeak         peak2;          //xy=804,716
+AudioFilterFIR           IF12r7;         //xy=807,622
+AudioAnalyzePeak         peak1;          //xy=810,563
+AudioMixer4              ModeSelect;     //xy=899,1034
+AudioEffectRectifier     AMdet;          //xy=950,623
+AudioFilterBiquad        BandWidth;      //xy=1059,1032
+AudioAmplifier           amp1;           //xy=1065.7142857142856,1138.5714285714284
+AudioAnalyzeToneDetect   tone700;          //xy=1222,1143
+AudioAnalyzeToneDetect   tone800;          //xy=1222,1191
+AudioAnalyzeToneDetect   tone600;          //xy=1223,1096
+AudioAnalyzeRMS          rms1;           //xy=1261,949
+AudioOutputI2S           LineOut;        //xy=1262,1029
+AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
+AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
+AudioConnection          patchCord3(PhaseI, H90plus);
+AudioConnection          patchCord4(PhaseQ, H00minus);
+AudioConnection          patchCord5(SSBselect, SSBroof);
+AudioConnection          patchCord6(H90plus, 0, USBmixer, 1);
+AudioConnection          patchCord7(H90plus, 0, LSBmixer, 1);
+AudioConnection          patchCord8(H00minus, 0, USBmixer, 2);
+AudioConnection          patchCord9(H00minus, 0, LSBmixer, 2);
+AudioConnection          patchCord10(SSBroof, 0, Second_mixer, 0);
+AudioConnection          patchCord11(USBmixer, USBscope);
+AudioConnection          patchCord12(USBmixer, peak1);
+AudioConnection          patchCord13(USBmixer, IF12r7);
+AudioConnection          patchCord14(USBmixer, 0, SSBselect, 1);
+AudioConnection          patchCord15(LSBmixer, LSBscope);
+AudioConnection          patchCord16(LSBmixer, peak2);
+AudioConnection          patchCord17(LSBmixer, 0, SSBselect, 2);
+AudioConnection          patchCord18(BFO, 0, Second_mixer, 1);
+AudioConnection          patchCord19(Second_mixer, 0, ModeSelect, 1);
+AudioConnection          patchCord20(IF12r7, AMdet);
+AudioConnection          patchCord21(ModeSelect, BandWidth);
+AudioConnection          patchCord22(AMdet, 0, ModeSelect, 0);
+AudioConnection          patchCord23(BandWidth, rms1);
+AudioConnection          patchCord24(BandWidth, 0, LineOut, 0);
+AudioConnection          patchCord25(BandWidth, 0, LineOut, 1);
+AudioConnection          patchCord26(BandWidth, amp1);
+AudioConnection          patchCord27(amp1, tone600);
+AudioConnection          patchCord28(amp1, tone700);
+AudioConnection          patchCord29(amp1, tone800);
+AudioControlSGTL5000     codec;          //xy=301,445
+// GUItool: end automatically generated code
+
+/*
+// IF version with baseband CW and CW tuning display for best decoding
+// removing the baseband CW to see if can make the vfo's track for a CW offset of 8k
+// GUItool: begin automatically generated code
+AudioInputI2S            IQ_in;          //xy=142,624
+AudioFilterFIR           PhaseI;         //xy=280,556
+AudioFilterFIR           PhaseQ;         //xy=286,722
+AudioMixer4              SSBselect;      //xy=325,1019
 AudioFilterFIR           H90plus;        //xy=438,557
 AudioFilterFIR           H00minus;       //xy=449,720
 AudioFilterFIR           SSBroof;        //xy=499,1017
@@ -91,10 +155,6 @@ AudioOutputI2S           LineOut;        //xy=1262,1029
 AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
 AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
 AudioConnection          patchCord3(PhaseI, H90plus);
-#ifdef USE_USB_AUDIO
-AudioConnection          patchCord4(PhaseI, 0, usb1, 0);
-AudioConnection          patchCord6(PhaseQ, 0, usb1, 1);
-#endif
 AudioConnection          patchCord5(PhaseQ, H00minus);
 AudioConnection          patchCord7(SSBselect, SSBroof);
 AudioConnection          patchCord8(H90plus, 0, USBmixer, 1);
@@ -106,7 +166,7 @@ AudioConnection          patchCord13(USBmixer, USBscope);
 AudioConnection          patchCord14(USBmixer, peak1);
 AudioConnection          patchCord15(USBmixer, IF12r7);
 AudioConnection          patchCord16(USBmixer, 0, SSBselect, 1);
-AudioConnection          patchCord17(USBmixer, 0, ModeSelect, 2);
+//AudioConnection          patchCord17(USBmixer, 0, ModeSelect, 2);   // baseband cw
 AudioConnection          patchCord18(LSBmixer, LSBscope);
 AudioConnection          patchCord19(LSBmixer, peak2);
 AudioConnection          patchCord20(LSBmixer, 0, SSBselect, 2);
@@ -123,185 +183,17 @@ AudioConnection          patchCord30(BandWidth, tone700);
 AudioConnection          patchCord31(BandWidth, tone800);
 AudioControlSGTL5000     codec;          //xy=301,445
 // GUItool: end automatically generated code
-
-/*
-// IF version with baseband CW, as sometimes the FA set freq CAT command fails to qsy.
-// GUItool: begin automatically generated code
-AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
-AudioFilterFIR           PhaseI;           //xy=206,292
-AudioFilterFIR           PhaseQ;           //xy=212,458
-AudioMixer4              SSBselect;         //xy=251.32147216796875,755.03564453125
-#ifdef USE_USB_AUDIO
-AudioOutputUSB           usb1;           //xy=361.66668701171875,369
-#endif
-AudioFilterFIR           H90plus;        //xy=364.66668701171875,293.3333435058594
-AudioFilterFIR           H00minus;       //xy=375.66668701171875,456.3333740234375
-AudioFilterFIR           SSBroof;           //xy=425,753.75
-AudioMixer4              USBmixer;       //xy=546.6666870117188,299.3333435058594
-AudioMixer4              LSBmixer;       //xy=549.6666870117188,450.3333740234375
-AudioAnalyzeFFT256       LSBscope;       //xy=557.8095550537109,571.9046897888184
-AudioAnalyzeFFT256       USBscope;       //xy=560.5238571166992,184.1904640197754
-AudioSynthWaveformSine   BFO;          //xy=626,886
-AudioEffectMultiply      Second_mixer;      //xy=634.7499771118164,762.7500019073486
-AudioAnalyzePeak         peak2;          //xy=730.666690826416,452.3333683013916
-AudioFilterFIR           IF12r7;         //xy=733.4763412475586,358.6190776824951
-AudioAnalyzePeak         peak1;          //xy=736.1905746459961,299.6190242767334
-AudioMixer4              ModeSelect;      //xy=825.8095092773438,770.1429214477539
-AudioEffectRectifier     AMdet;          //xy=876.3334197998047,359.2855930328369
-AudioFilterBiquad        BandWidth;      //xy=985.0477104187012,768.8571186065674
-AudioAnalyzeRMS          rms1;           //xy=1187.7142181396484,685.7618789672852
-AudioOutputI2S           LineOut;        //xy=1188.4285888671875,765.8572845458984
-AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
-AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
-AudioConnection          patchCord3(PhaseI, H90plus);
-#ifdef USE_USB_AUDIO
-AudioConnection          patchCord4(PhaseI, 0, usb1, 0);
-AudioConnection          patchCord6(PhaseQ, 0, usb1, 1);
-#endif
-AudioConnection          patchCord5(PhaseQ, H00minus);
-AudioConnection          patchCord7(SSBselect, SSBroof);
-AudioConnection          patchCord8(H90plus, 0, USBmixer, 1);
-AudioConnection          patchCord9(H90plus, 0, LSBmixer, 1);
-AudioConnection          patchCord10(H00minus, 0, USBmixer, 2);
-AudioConnection          patchCord11(H00minus, 0, LSBmixer, 2);
-AudioConnection          patchCord12(SSBroof, 0, Second_mixer, 0);
-AudioConnection          patchCord13(USBmixer, USBscope);
-AudioConnection          patchCord14(USBmixer, peak1);
-AudioConnection          patchCord15(USBmixer, IF12r7);
-AudioConnection          patchCord16(USBmixer, 0, SSBselect, 1);
-AudioConnection          patchCord17(LSBmixer, LSBscope);
-AudioConnection          patchCord18(LSBmixer, peak2);
-AudioConnection          patchCord19(LSBmixer, 0, SSBselect, 2);
-AudioConnection          patchCord20(BFO, 0, Second_mixer, 1);
-AudioConnection          patchCord21(Second_mixer, 0, ModeSelect, 1);
-AudioConnection          patchCord22(IF12r7, AMdet);
-AudioConnection          patchCord23(ModeSelect, BandWidth);
-AudioConnection          patchCord24(AMdet, 0, ModeSelect, 0);
-AudioConnection          patchCord25(BandWidth, rms1);
-AudioConnection          patchCord26(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord27(BandWidth, 0, LineOut, 1);
-AudioConnection          patchCord28(USBmixer, 0, ModeSelect, 2);
-AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
-// GUItool: end automatically generated code
 */
 
-/*
-// GUItool: begin automatically generated code
-AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
-AudioFilterFIR           PhaseI;           //xy=206,292
-AudioFilterFIR           PhaseQ;           //xy=212,458
+// #define USE_USB_AUDIO        // not needed for self contained radio but works really slick
+                                // with HDSDR.  Can include later.
 #ifdef USE_USB_AUDIO
-AudioOutputUSB           usb1;           //xy=361.66668701171875,369
+  AudioOutputUSB           usb1;           //xy=435,633
+  AudioConnection          patchCord4(PhaseI, 0, usb1, 0);
+  AudioConnection          patchCord6(PhaseQ, 0, usb1, 1);
 #endif
-AudioFilterFIR           H90plus;        //xy=364.66668701171875,293.3333435058594
-AudioFilterFIR           H00minus;       //xy=375.66668701171875,456.3333740234375
-AudioMixer4              SSBselect;         //xy=432.5714416503906,756.2856636047363
-AudioMixer4              USBmixer;       //xy=546.6666870117188,299.3333435058594
-AudioMixer4              LSBmixer;       //xy=549.6666870117188,450.3333740234375
-AudioAnalyzeFFT256       LSBscope;       //xy=557.8095550537109,571.9046897888184
-AudioAnalyzeFFT256       USBscope;       //xy=560.5238571166992,184.1904640197754
-AudioSynthWaveformSine   BFO;          //xy=626,886
-AudioEffectMultiply      Second_mixer;      //xy=634.7499771118164,762.7500019073486
-AudioAnalyzePeak         peak2;          //xy=730.666690826416,452.3333683013916
-AudioFilterFIR           IF12r7;         //xy=733.4763412475586,358.6190776824951
-AudioAnalyzePeak         peak1;          //xy=736.1905746459961,299.6190242767334
-AudioMixer4              ModeSelect;      //xy=825.8095092773438,770.1429214477539
-AudioEffectRectifier     AMdet;          //xy=876.3334197998047,359.2855930328369
-AudioFilterBiquad        BandWidth;      //xy=985.0477104187012,768.8571186065674
-AudioAnalyzeRMS          rms1;           //xy=1187.7142181396484,685.7618789672852
-AudioOutputI2S           LineOut;        //xy=1188.4285888671875,765.8572845458984
-AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
-AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
-AudioConnection          patchCord3(PhaseI, H90plus);
-#ifdef USE_USB_AUDIO
-AudioConnection          patchCord4(PhaseI, 0, usb1, 0);
-AudioConnection          patchCord6(PhaseQ, 0, usb1, 1);
-#endif
-AudioConnection          patchCord5(PhaseQ, H00minus);
-AudioConnection          patchCord7(H90plus, 0, USBmixer, 1);
-AudioConnection          patchCord8(H90plus, 0, LSBmixer, 1);
-AudioConnection          patchCord9(H00minus, 0, USBmixer, 2);
-AudioConnection          patchCord10(H00minus, 0, LSBmixer, 2);
-AudioConnection          patchCord11(SSBselect, 0, Second_mixer, 0);
-AudioConnection          patchCord12(USBmixer, USBscope);
-AudioConnection          patchCord13(USBmixer, peak1);
-AudioConnection          patchCord14(USBmixer, IF12r7);
-AudioConnection          patchCord15(USBmixer, 0, SSBselect, 1);
-AudioConnection          patchCord16(LSBmixer, LSBscope);
-AudioConnection          patchCord17(LSBmixer, peak2);
-AudioConnection          patchCord18(LSBmixer, 0, SSBselect, 2);
-AudioConnection          patchCord19(BFO, 0, Second_mixer, 1);
-AudioConnection          patchCord20(Second_mixer, 0, ModeSelect, 1);
-AudioConnection          patchCord21(IF12r7, AMdet);
-AudioConnection          patchCord22(ModeSelect, BandWidth);
-AudioConnection          patchCord23(AMdet, 0, ModeSelect, 0);
-AudioConnection          patchCord24(BandWidth, rms1);
-AudioConnection          patchCord25(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord26(BandWidth, 0, LineOut, 1);
-AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
-// GUItool: end automatically generated code
 
 
-
-// GUItool: begin automatically generated code
-AudioInputI2S            IQ_in;          //xy=68.66668701171875,360.3333740234375
-AudioFilterFIR           H45minus;           //xy=199.7142791748047,801.999921798706
-AudioFilterFIR           PhaseI;           //xy=206,292
-AudioFilterFIR           H45plus;           //xy=205.42856979370117,722.8571281433105
-AudioFilterFIR           PhaseQ;           //xy=212,458
-#ifdef USE_USB_AUDIO
-AudioOutputUSB           usb1;           //xy=361.66668701171875,369
-#endif
-AudioFilterFIR           H90plus;        //xy=364.66668701171875,293.3333435058594
-AudioFilterFIR           H00minus;       //xy=375.66668701171875,456.3333740234375
-AudioMixer4              SSBselect;         //xy=432.5714416503906,756.2856636047363
-AudioMixer4              USBmixer;       //xy=546.6666870117188,299.3333435058594
-AudioMixer4              LSBmixer;       //xy=549.6666870117188,450.3333740234375
-AudioAnalyzeFFT256       LSBscope;       //xy=557.8095550537109,571.9046897888184
-AudioAnalyzeFFT256       USBscope;       //xy=560.5238571166992,184.1904640197754
-AudioSynthWaveformSine   BFO;          //xy=626,886
-AudioEffectMultiply      Second_mixer;      //xy=634.7499771118164,762.7500019073486
-AudioAnalyzePeak         peak2;          //xy=730.666690826416,452.3333683013916
-AudioFilterFIR           IF12r7;         //xy=733.4763412475586,358.6190776824951
-AudioAnalyzePeak         peak1;          //xy=736.1905746459961,299.6190242767334
-AudioMixer4              ModeSelect;      //xy=825.8095092773438,770.1429214477539
-AudioEffectRectifier     AMdet;          //xy=876.3334197998047,359.2855930328369
-AudioFilterBiquad        BandWidth;      //xy=985.0477104187012,768.8571186065674
-AudioAnalyzeRMS          rms1;           //xy=1187.7142181396484,685.7618789672852
-AudioOutputI2S           LineOut;        //xy=1188.4285888671875,765.8572845458984
-AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
-AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
-AudioConnection          patchCord3(H45minus, 0, SSBselect, 2);
-AudioConnection          patchCord4(PhaseI, H90plus);
-#ifdef USE_USB_AUDIO
-AudioConnection          patchCord5(PhaseI, 0, usb1, 0);
-AudioConnection          patchCord9(PhaseQ, 0, usb1, 1);
-#endif
-AudioConnection          patchCord6(PhaseI, H45plus);
-AudioConnection          patchCord7(H45plus, 0, SSBselect, 1);
-AudioConnection          patchCord8(PhaseQ, H00minus);
-AudioConnection          patchCord10(PhaseQ, H45minus);
-AudioConnection          patchCord11(H90plus, 0, USBmixer, 1);
-AudioConnection          patchCord12(H90plus, 0, LSBmixer, 1);
-AudioConnection          patchCord13(H00minus, 0, USBmixer, 2);
-AudioConnection          patchCord14(H00minus, 0, LSBmixer, 2);
-AudioConnection          patchCord15(SSBselect, 0, Second_mixer, 0);
-AudioConnection          patchCord16(USBmixer, USBscope);
-AudioConnection          patchCord17(USBmixer, peak1);
-AudioConnection          patchCord18(USBmixer, IF12r7);
-AudioConnection          patchCord19(LSBmixer, LSBscope);
-AudioConnection          patchCord20(LSBmixer, peak2);
-AudioConnection          patchCord21(BFO, 0, Second_mixer, 1);
-AudioConnection          patchCord22(Second_mixer, 0, ModeSelect, 1);
-AudioConnection          patchCord23(IF12r7, AMdet);
-AudioConnection          patchCord24(ModeSelect, BandWidth);
-AudioConnection          patchCord25(AMdet, 0, ModeSelect, 0);
-AudioConnection          patchCord26(BandWidth, rms1);
-AudioConnection          patchCord27(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord28(BandWidth, 0, LineOut, 1);
-AudioControlSGTL5000     codec;          //xy=227.6666717529297,181.3333342075348
-// GUItool: end automatically generated code
-*/
 
 // we have 65k colors.  How to pick one? Limit to just 16.
          //  4bpp pallett  0-3, 4-7, 8-11, 12-15
@@ -456,7 +348,8 @@ int  t_in, t_out;
 uint8_t tx_in_progress;
 
 // Audio IF
-int bfo = 8800;                 // bfo somewhere near 7700 1st filter, 8800 2nd 80 tap filter
+#define BFO_FREQ 9000
+int bfo = BFO_FREQ;             // bfo on the upper edge of the roofing filter
 
 // cw decode
 int cread_buf[16];
@@ -538,7 +431,7 @@ int i,j,r,g,b;
                                            // no commands for the 2nd mixer
   ModeSelect.gain(0,0.0);                  // turn off AM
   ModeSelect.gain(1,1.0);                  // turn on SSB audio path
-  ModeSelect.gain(2,0.0);                  // turn off CW
+  ModeSelect.gain(2,0.0);                  // turn off CW  !!! changed away from cw baseband
 
   BandWidth.setLowpass(0,3000,0.67);       // use these or actual butterworth Q's
   BandWidth.setLowpass(1,3000,1.10);
@@ -556,6 +449,8 @@ int i,j,r,g,b;
 
   USBscope.averageTogether(50);            // or 40 for faster waterfall
   LSBscope.averageTogether(50);
+
+  amp1.gain(10.0);                         // will this avoid zero's being returned by tone objects
 
 }
 
@@ -597,6 +492,7 @@ int current;
    if( mode_menu_data.param[selection] != -1 ){
       if( selection != 7 ) mode_menu_data.current = selection;  // added phasing to this menu
       selection = mode_menu_data.param[selection];              // perhaps it should be elsewhere
+                                                                // as is just special case processing here
 
       if( selection != 7 ) vfo_mode &= 0x0f;    // save the qcx mode flags, clear the sdr mode flags
       switch( selection ){
@@ -610,14 +506,23 @@ int current;
                  ModeSelect.gain(2,0.0);
                  mux_selected = 3;                        // no connection on 3
         break;
-        case 1:  vfo_mode |= VFO_CW;
-                 digitalWriteFast(QCX_MUTE,HIGH);                 
-                 ModeSelect.gain(2,agc_gain);              // turn on CW
-                 ModeSelect.gain(0,0.0);                   // turn off AM
-                 ModeSelect.gain(1,0.0);                   // turn off SSB
+//        case 1:  vfo_mode |= VFO_CW;                       // baseband sdr CW
+//                 digitalWriteFast(QCX_MUTE,HIGH);                 
+//                 ModeSelect.gain(2,agc_gain);              // turn on CW
+//                 ModeSelect.gain(0,0.0);                   // turn off AM
+//                 ModeSelect.gain(1,0.0);                   // turn off SSB
+//                 SSBselect.gain(1,0.0);
+//                 SSBselect.gain(2,0.0);                   // USB audio
+//                 mux_selected = 2;
+//        break;
+        case 1:  vfo_mode |= VFO_CW;                       // IF SDR CW instead of baseband
+                 digitalWriteFast(QCX_MUTE,HIGH);
+                 ModeSelect.gain(1,agc_gain);              // SSB audio
+                 ModeSelect.gain(0,0.0);                   // AM off
+                 ModeSelect.gain(2,0.0);                   // baseband cw off
                  SSBselect.gain(1,0.0);
-                 SSBselect.gain(2,0.0);                   // USB audio
-                 mux_selected = 2;
+                 SSBselect.gain(2,1.0);
+                 mux_selected = 1;
         break;
         case 2:  vfo_mode |= VFO_LSB;  
                  digitalWriteFast(QCX_MUTE,HIGH);
@@ -815,42 +720,40 @@ static int flip;
 }
 
 
+// ***************   group of functions for a morse decoder
+
 // indicator to show when tuned spot on 700 hz.  1st steps for another cw decoder.
 int cw_tune(){
 static float t6, t7, t8;        // tone results
-static float rav;               // running average of the min buckets
 float av, f, t;                 // average of min buckets, meter force, max tone
 static int loc;                 // location of the tune meter needle
 int det;                        // cw mark space detect
 int new_loc, c;                 // raw new meter needle location, color of needle changes mark/space
 static int count;               // mark,space counts
-
-// debug
-// static uint32_t  tm;      // verify timing
+static float rav;               // running average of signals
    
    if( tone700.available() == 0 ) return 0;      // should run at 10ms rate
-  // if( tone600.available() == 0 ) return;
-  // if( tone800.available() == 0 ) return;
    t7 = tone700.read();
-   t8 = tone800.read();
-   t6 = tone600.read();
-
- //Serial.println( millis() - tm );     // was (get 1 to 25 very strange)
- //  tm = millis();                    // get 8 to 12 now with loop preference change
-                                      // which maybe makes sense as the audio block is 3ms of audio
+   if( t7 == 0.0 ) t7 = rav;
+                                                 // these objects sometimes read as zero
+   if( tone800.available() ) t8 = tone800.read();
+   if( t8 == 0.0 ) t8 = rav;
+   if( tone600.available() ) t6 = tone600.read();
+   if( t6 == 0.0 ) t6 = rav;
 
 // perhaps we should see what the signals are before getting too carried away.  Seems noisy.
-//  ++count;
-//  if( count > 20 ){
-//    count = 0;
-//    Serial.print(t6,4);  Serial.write(' ');
-//    Serial.print(t7,4);  Serial.write(' ');
-//    Serial.println(t8,4);
-//  }
+ //   static int mod;
+  //  ++mod;
+  //  if( mod > 20 ){
+  //    mod = 0;
+  //    Serial.print(t6,4);  Serial.write(' ');
+  //    Serial.print(t7,4);  Serial.write(' ');
+  //    Serial.println(t8,4);
+  //  }
 
    t = f = av = 0.0;
    
-   if( t7 > t6 && t7 > t8 ){                   // desired case
+   if( t7 > t6 && t7 > t8 ){                   // desired case 700hz
        av = ( t6 + t8 )/2;
        t = t7;
        f = ( t8 - t6 )/av;
@@ -866,11 +769,17 @@ static int count;               // mark,space counts
        f = ( t8 - av )/av;
    }
 
-   rav = 15.0 * rav + av;
+   av = (t6+t7+t8-t/2.0)/3.0;
+   rav = 15.0*rav + av;
    rav /= 16.0;
+   det = ( t > 2.0*rav ) ? 1 : 0;       //2.0 - 3.0  noise to ok
 
-   det = ( t > 2.9 * rav ) ? 1 : 0;       //2.0 - 3.0  noise to ok
    det = cw_denoise( det );
+
+   // debug arduino graph values to see signals
+   Serial.print( 10*t ); Serial.write(' '); Serial.print(10*rav); Serial.write(' ');
+   Serial.write(' '); Serial.println(det);
+
 
    if( det ){                // marking
       if( count > 0 ){
@@ -901,11 +810,13 @@ static int count;               // mark,space counts
 // !!! inhibit these writes if position and color are same as last time
 // !!! and consider only showing when in cw sdr mode
 // void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color);
-   tft.drawFastVLine(290+loc-2,40,12,0);    // erase like a sprite
-   tft.drawFastVLine(290+loc-1,40,12,c);
-   tft.drawFastVLine(290+loc,40,12,c);
-   tft.drawFastVLine(290+loc+1,40,12,c);
-   tft.drawFastVLine(290+loc+2,40,12,0);
+   if( screen_owner == DECODE ){
+      tft.drawFastVLine(290+loc-2,40,12,0);    // erase like a sprite
+      tft.drawFastVLine(290+loc-1,40,12,c);
+      tft.drawFastVLine(290+loc,40,12,c);
+      tft.drawFastVLine(290+loc+1,40,12,c);
+      tft.drawFastVLine(290+loc+2,40,12,0);
+   }
 
    return 1;              // ok to run time consuming waterfall now
 }
@@ -1006,6 +917,7 @@ int ls,force;
 static int wt;    /* heavy weighting will mess up the algorithm, so this compensation factor */
 static int singles;
 static int farns,ch_count;
+static int eees;
 
    if( cread_indx < 2 ) return;    // need at least one mark and one space in order to decode something
    if( screen_owner != DECODE ) return; 
@@ -1058,7 +970,9 @@ static int farns,ch_count;
  
    if( m_ch ){   /* found something so print it */
       ++ch_count;
-      decode_print(m_ch);
+      if( m_ch == 'E' ) ++eees;         // just noise ?
+      else eees = 0;
+      if( eees < 5 ) decode_print(m_ch);
       if( cread_buf[ls] > 3*slicer + farns ){   // check for word space
         if( ch_count == 1 ) ++farns;    // single characters, no words printed
         ch_count= 0;
@@ -1077,6 +991,7 @@ static int farns,ch_count;
    
 }
 
+//  ***************   end of morse decode functions
 
 
 // change the qcx frequency when changing modes to remain on the same frequency
@@ -1088,23 +1003,23 @@ char buf[33];
 char buf2[33];
 
    if( old_mode == new_mode ) return;
-   // if( old_mode < 2 && new_mode < 2 ) return;          // no tuning change needed CW to CW modes
-   // this is what prevented the tune change when I tried 600hz cw tone
    
    freq = vfo_a;
    strcpy(buf,"FA000");
    if( vfo_mode & VFO_B ) freq = vfo_b, buf[1] = 'B';
 
    switch( old_mode ){                                  // remove current offsets
-      case 0:  freq += 700;  break;                     // qsx mode
-      case 1:  freq += 700;  break;                     // cw sdr baseband
+      case 0:  /*freq += 700;*/  break;                     // qsx mode
+//      case 1:  freq += 700;  break;                     // cw sdr baseband
+      case 1:  freq -= bfo;  break;                     // CW IF USB
       case 2:  freq += bfo;  break;                     // lsb IF
       case 3:  freq -= bfo;  break;                     // usb IF
       case 4:  freq += 12700;  break;                   // am filter center
    }
    switch( new_mode ){
-      case 0:  freq -= 700;  break;
-      case 1:  freq -= 700;  break;
+      case 0:  /*freq -= 700;*/  break;
+//      case 1:  freq -= 700;  break;
+      case 1:  freq += bfo;  break;                     // IF CW mode
       case 2:  freq -= bfo;  break;                     // lsb
       case 3:  freq += bfo;  break;                     // usb
       case 4:  freq -= 12700;   break;
@@ -1114,7 +1029,7 @@ char buf2[33];
    itoa( freq, buf2, 10 );
    strcat( buf, buf2 );
    strcat( buf,";");
-   delay(300);                                          // wait any current command
+   delay(100);                                          // wait qcx processing any current command
    cat.print(buf);
    cmd_tm = millis();                                   // delay future command
 }
@@ -1486,11 +1401,13 @@ int i,mult;
    if( vfo_mode & VFO_B ) vfo = vfo_b;
    else vfo = vfo_a;
 
-   if( (vfo_mode & VFO_AM ) == VFO_AM ) vfo += 12000;   // AM IF is 12.7 but sound better 1k low
-   else if( ( vfo_mode & VFO_CW ) == 0 ) vfo -= 700;
-   if( (vfo_mode & VFO_USB ) ) vfo -= bfo;
-   if( (vfo_mode & VFO_LSB ) ) vfo += bfo;
-   //if( (vfo_mode & VFO_CW ) &&  mode_menu_data.current == 1) vfo -= bfo;
+   // qcx reports vfo 700 hz higher than actual as it is a CW receiver
+   // remove that offset for AM, USB, LSB modes.  Add subtract BFO freq.
+   if( (vfo_mode & VFO_AM ) == VFO_AM ) vfo += 12000;   // AM IF is 12.7 
+   else if( ( vfo_mode & VFO_CW ) == 0 ) vfo -= 700;    // not CW, remove offset.
+   if( (vfo_mode & VFO_USB ) ) vfo -= BFO_FREQ;
+   if( (vfo_mode & VFO_LSB ) ) vfo += BFO_FREQ;
+   if( (vfo_mode & VFO_CW ) &&  mode_menu_data.current == 1) vfo -= BFO_FREQ;   // SDR CW mode
    
    // 40 meter radio, ignore 10 meg digit for now
    mult = 1000000;
@@ -1781,6 +1698,8 @@ void cat_qu_flags(){                       // process the qu flags response
 
 void cat_freq( int32_t *vfo ){             // update a vfo from cat response
 int32_t temp, s;
+char buf[33];
+char buf2[33];
 
     if( strlen(response) != 13 ) return;   // ??
     temp = atoi( &response[2] );
@@ -1799,12 +1718,42 @@ int32_t temp, s;
            vfo_mode_disp();
        }
     }
+
+    // tracking split for CW mode using IF
+    // if split and cw sdr mode, keep vfo B on freq
+    if( mode_menu_data.current == 1 && (vfo_mode & VFO_SPLIT) ){
+        if( vfo_a - vfo_b != BFO_FREQ && rit == 0 ){           // normal qcx operation
+           temp = vfo_a - BFO_FREQ;
+           strcpy(buf,"FB000"); 
+           if( temp < 10000000 ) strcat(buf,"0");         //add a zero
+           itoa( temp, buf2, 10 );
+           strcat( buf, buf2 );
+           strcat( buf,";");
+           cat.print(buf);
+        }
+        // qcx does not implement RIT when in split mode but allows it to half work
+        // so change vfo_a to simulate RIT keeping vfo_b fixed now, final effect
+        // works like a normal split.  ( usb rit works backwards )
+        // this has a very slow response due to 1 second between cat commands.
+        // turning rit off will leave the radio on the wrong freq
+        // Let's try messing with the bfo instead of moving vfo_a
+        //else if( rit != 0 && vfo_a - vfo_b != bfo + rit ){
+        //   temp = vfo_b + bfo + rit;
+        //   strcpy(buf,"FA000"); 
+        //   if( temp < 10000000 ) strcat(buf,"0");
+        //   itoa( temp, buf2, 10 );
+        //   strcat( buf, buf2 );
+        //   strcat( buf,";");
+        //   cat.print(buf);           
+        //}
+    }
 }
 
 
 void cat_mode( ){     // from IF command
 uint8_t temp;
 int32_t temp2;
+static int old_rit;
 
    if( strlen(response) < 35 ) return;
     // build new vfo_mode bits
@@ -1834,6 +1783,15 @@ int32_t temp2;
    }
 
    qu_flags &= ~QUIF;
+
+   // sdr cw mode, and not split check and send cat here
+   if( mode_menu_data.current == 1 ){
+       if( (vfo_mode & VFO_SPLIT) == 0 ) cat.print("FR2;");   // set split
+       if( rit != old_rit ){
+          old_rit = rit;
+          BFO.frequency( BFO_FREQ + rit );          // move the bfo for RIT in split mode
+       }
+   }
 }
 
 
@@ -1881,8 +1839,8 @@ uint8_t  r;
 uint16_t  bw_low,bw_high;
 static uint8_t dashline;
 
-    // show bandwidth on waterfall                                             // USB audio is on LSB waterfall
-    if( side <= 0 && (vfo_mode & (VFO_USB ))){                                 // LSB bandwidth coloring
+    // show bandwidth on waterfall                                     // USB audio is on LSB waterfall
+    if( side <= 0 && (vfo_mode & VFO_USB )){      
        bw_high = band_width_menu_data.param[band_width_menu_data.current];
        bw_high /= 172;
        bw_low = bfo/172;
@@ -1892,7 +1850,7 @@ static uint8_t dashline;
           if( side == bw_high || side == bw_low ) return 10;
        }
     }
-    else if(side >= 0 && (vfo_mode & ( VFO_LSB + VFO_AM ))){  // USB or AM
+    else if(side >= 0 && (vfo_mode & ( VFO_LSB + VFO_AM ))){           // LSB or AM
        bw_high = band_width_menu_data.param[band_width_menu_data.current];
        bw_high /= 172;
        if( vfo_mode & VFO_AM ){
@@ -1906,9 +1864,15 @@ static uint8_t dashline;
        if( side == bw_low || side == bw_high ) return 10;
     }
 
-    if( side == 4 && (vfo_mode & VFO_CW) ){
-        ++dashline;
-        if( (dashline & 0xc) == 0xc ) return 10;     // CW tuning position
+    if( vfo_mode & VFO_CW ){
+        if( side == 4 && mode_menu_data.current == 0 ){
+            ++dashline;
+            if( (dashline & 0xc) == 0xc ) return 15;     // CW tuning position    10    
+        }
+        if( side == (-bfo+700)/172 && mode_menu_data.current == 1 ){   // CW SDR on IF freq
+            ++dashline;
+            if( (dashline & 0xc) == 0xc ) return 15;     // CW tuning position                  
+        }
     }
     
     // show the ends of the waterfall
