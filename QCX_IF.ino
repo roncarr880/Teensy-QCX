@@ -8,8 +8,6 @@
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
  * to work on
- *   The way the overload protection works,  loud sigs on the bandscope desensitize the RX.
- *      involves peak detectors, agc, smeter code 
  *   Add a decoder menu. 
  *   Wire a fet to switch dit or dah to ground for hellschreiber
  *   make a hole in the top case
@@ -40,14 +38,19 @@ Change log:
   Added a CW tuning indicator.
   Lower the 1100 hz filter for CW work.  Trying a 800hz lowpass.
   Added a separate CW decoder for SDR CW mode.  Had some trouble with the audio library Tone objects
-     returning zero. Added a gain of 10 and some workaround code.
+     returning zero. Added an audio object with a gain of 10 and some workaround code.
   Move SDR CW mode to the IF to get away from the baseband noise.
      Operate in a tracking split mode to keep TX freq correct.
      Added RIT which moves the bfo when in CW SDR mode.  The QCX reports RIT changes in split mode
      but does not implement with tuning changes.
   Verified power out ok, tracks spec well, but expected better than 65% efficiency with class E.
      1.2 watts at 9 volts, 50% eff.
-     2 watts at 10 volts, 60% eff.   2.5 watts at 11 volts.  3 watts at 12.  3.8 watts at 13. 
+     2 watts at 10 volts, 60% eff.   2.5 watts at 11 volts.  3 watts at 12.  3.8 watts at 13.
+  Added digital gain to the agc function to compensate for when loud signals outside the listening
+     bandwidth reduce the front end gain ( from auto attenuation in the SSB mixers when peak signals added
+     approach 32767 - max value for int16_t. )
+  Peak2 seems redundant, commented out its code.
+  New Waterfall algorithm for less time used per call.     
  
  *******************************************************************************/
 
@@ -64,7 +67,7 @@ Change log:
 #define QCX_MUTE 2              // pin 2 high mutes qcx audio
 
 
-// peak1 and peak2 used to avoid exceeding int16 size in the usb,lsb adders.
+// peak1 used to avoid exceeding int16 size in the usb,lsb adders.
 
 // GUItool: begin automatically generated code
 AudioInputI2S            IQ_in;          //xy=142,624
@@ -80,7 +83,7 @@ AudioAnalyzeFFT256       LSBscope;       //xy=631,835
 AudioAnalyzeFFT256       USBscope;       //xy=634,448
 AudioSynthWaveformSine   BFO;            //xy=700,1150
 AudioEffectMultiply      Second_mixer;   //xy=708,1026
-AudioAnalyzePeak         peak2;          //xy=804,716
+// AudioAnalyzePeak         peak2;          //xy=804,716
 AudioFilterFIR           IF12r7;         //xy=807,622
 AudioAnalyzePeak         peak1;          //xy=810,563
 AudioMixer4              ModeSelect;     //xy=899,1034
@@ -107,7 +110,7 @@ AudioConnection          patchCord12(USBmixer, peak1);
 AudioConnection          patchCord13(USBmixer, IF12r7);
 AudioConnection          patchCord14(USBmixer, 0, SSBselect, 1);
 AudioConnection          patchCord15(LSBmixer, LSBscope);
-AudioConnection          patchCord16(LSBmixer, peak2);
+//AudioConnection          patchCord16(LSBmixer, peak2);
 AudioConnection          patchCord17(LSBmixer, 0, SSBselect, 2);
 AudioConnection          patchCord18(BFO, 0, Second_mixer, 1);
 AudioConnection          patchCord19(Second_mixer, 0, ModeSelect, 1);
@@ -244,6 +247,7 @@ XPT2046_Touchscreen ts(CS_PIN);
 #define VFO_AM   128
 
 //  radio variables
+// !!! not sure we need step, as just guessing at the value from how far the vfo moves per update.
 int32_t  vfo_a, vfo_b, rit, stp = 100, rit_stp = 10;
 uint8_t  vfo_mode;           // undefined, should pick up value on init
 
@@ -284,7 +288,7 @@ void (* menu_dispatch )( int32_t );    // pointer to function that is processing
 
 struct menu {
    char title[16];
-   const char *menu_item[8];
+   const char *menu_item[8];    // !! be careful with the length of the strings below
    int param[8];
    int y_size;                  // x size will be half the screen, two items on a line for now
    int color;
@@ -292,14 +296,14 @@ struct menu {
 };
 
 // mode menu items
-const char m_qcx[] = " CW QCX";          // qcx audio sampled on A2 via audio library
-const char m_cw[]  = " CW sdr";
+const char m_qcx[] = " CW QCX";          // qcx audio pass through mode
+const char m_cw[]  = " CW SDR";
 const char m_lsb[] = " LSB";
 const char m_usb[] = " USB";
 const char m_am[]  = " AM";
 const char m_sam[] = " ";
 const char m_data[]= " ";
-const char m_phase[] = "Phase";
+const char m_phase[] = "Phase";          // codec issue with samples order ( twin peaks issue )
 
 struct menu mode_menu_data = {
    { "SDR Mode" },
@@ -327,7 +331,7 @@ struct menu band_width_menu_data = {
    4
 };
 
-uint8_t ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
+int ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
 
 
 // phase correction FIRs. Apparently sometimes the I2s audio samples are 1 step out of phase
@@ -345,7 +349,7 @@ float rms_value;
 #define TBUFSIZE  16
 char tbuf[TBUFSIZE];            // power of two buffer
 int  t_in, t_out;
-uint8_t tx_in_progress;
+int  tx_in_progress;
 
 // Audio IF
 #define BFO_FREQ 9000
@@ -397,7 +401,7 @@ int i,j,r,g,b;
 
    // Setup the audio shield
   AudioNoInterrupts();
-  AudioMemory(20);
+  AudioMemory(30);
   codec.enable();
   //codec.volume(0.5);                        // headphone volume, not used eventually
   //codec.unmuteHeadphone();
@@ -431,9 +435,9 @@ int i,j,r,g,b;
                                            // no commands for the 2nd mixer
   ModeSelect.gain(0,0.0);                  // turn off AM
   ModeSelect.gain(1,1.0);                  // turn on SSB audio path
-  ModeSelect.gain(2,0.0);                  // turn off CW  !!! changed away from cw baseband
+  // ModeSelect.gain(2,0.0);                  // turn off CW baseband, not used now, using IF CW.
 
-  BandWidth.setLowpass(0,3000,0.67);       // use these or actual butterworth Q's
+  BandWidth.setLowpass(0,3000,0.67);       // actual butterworth Q's are used when changing bandwidth
   BandWidth.setLowpass(1,3000,1.10);
   BandWidth.setLowpass(2,3000,0.707);
   BandWidth.setLowpass(3,3000,1.00);       // 4 IIR lowpass cascade
@@ -450,7 +454,8 @@ int i,j,r,g,b;
   USBscope.averageTogether(50);            // or 40 for faster waterfall
   LSBscope.averageTogether(50);
 
-  amp1.gain(10.0);                         // will this avoid zero's being returned by tone objects
+  amp1.gain(10.0);                         // will this avoid zero's being returned by tone objects?
+                                           // no, but seems to help
 
 }
 
@@ -503,7 +508,7 @@ int current;
                  SSBselect.gain(2,0.0);
                  ModeSelect.gain(0,0.0);
                  ModeSelect.gain(1,0.0);
-                 ModeSelect.gain(2,0.0);
+                 //ModeSelect.gain(2,0.0);
                  mux_selected = 3;                        // no connection on 3
         break;
 //        case 1:  vfo_mode |= VFO_CW;                       // baseband sdr CW
@@ -515,11 +520,13 @@ int current;
 //                 SSBselect.gain(2,0.0);                   // USB audio
 //                 mux_selected = 2;
 //        break;
+//   leaving modeselect 2 in place in case wish to go back to baseband CW someday
+//   but for now getting CW SDR through the IF bandpass, bfo processing
         case 1:  vfo_mode |= VFO_CW;                       // IF SDR CW instead of baseband
                  digitalWriteFast(QCX_MUTE,HIGH);
                  ModeSelect.gain(1,agc_gain);              // SSB audio
                  ModeSelect.gain(0,0.0);                   // AM off
-                 ModeSelect.gain(2,0.0);                   // baseband cw off
+                 //ModeSelect.gain(2,0.0);                   // baseband cw off
                  SSBselect.gain(1,0.0);
                  SSBselect.gain(2,1.0);
                  mux_selected = 1;
@@ -528,7 +535,7 @@ int current;
                  digitalWriteFast(QCX_MUTE,HIGH);
                  ModeSelect.gain(1,agc_gain);              // SSB audio
                  ModeSelect.gain(0,0.0);
-                 ModeSelect.gain(2,0.0);                   // am cw off
+                 //ModeSelect.gain(2,0.0);                   // am cw off
                  SSBselect.gain(1,1.0);
                  SSBselect.gain(2,0.0);                    // usb to listen to LSB audio
                  mux_selected = 1;
@@ -537,7 +544,7 @@ int current;
                  digitalWriteFast(QCX_MUTE,HIGH);
                  ModeSelect.gain(1,agc_gain);
                  ModeSelect.gain(0,0.0);                   // AM off
-                 ModeSelect.gain(2,0.0);
+                 //ModeSelect.gain(2,0.0);
                  SSBselect.gain(1,0.0);
                  SSBselect.gain(2,1.0);
                  mux_selected = 1;
@@ -546,7 +553,7 @@ int current;
                  digitalWriteFast(QCX_MUTE,HIGH);
                  ModeSelect.gain(1,0.0);                  // ssb off
                  ModeSelect.gain(0,agc_gain);             // AM on
-                 ModeSelect.gain(2,0.0);                  // cw off
+                 //ModeSelect.gain(2,0.0);                  // cw off ( baseband cw )
                  mux_selected = 0;
         break;
         case 7:  PhaseChange(1);  break;                  // phasing correction    
@@ -664,7 +671,6 @@ int32_t x,y;
 void loop() {
 static int c_state;
 int32_t t;
-static int flip;
 
    // poll radio once a second, process qu_flags as a priority
    if( ( millis() - cmd_tm > 1000 ) && ManInTheMiddle == 0 ){
@@ -705,15 +711,13 @@ static int flip;
       (*menu_dispatch)(t);    // off to whoever owns the touchscreen
    }
 
-   if( cw_tune() ){                   // preference to cw_tune instead of waterfall
-      flip ^= 1;
-      if( flip ) USBwaterfall();      // run waterfall when we know new tune data is 10ms away 
-      else LSBwaterfall();
-   }
+   USBwaterfall();         // new algorithm for less time, but need 65 calls to complete writes
+   LSBwaterfall();
    
    auto_atn();             // front end gain reduction if rcv very loud signals
    agc();
 
+   cw_tune();
    if( mode_menu_data.current == 1 ) code_read();   // run SDR cw decoder
    
    // balance_schmoo();    // !!! testing
@@ -723,6 +727,7 @@ static int flip;
 // ***************   group of functions for a morse decoder
 
 // indicator to show when tuned spot on 700 hz.  1st steps for another cw decoder.
+// this function doesn't work for QCX CW mode as the audio path to the tone detectors is muted.
 int cw_tune(){
 static float t6, t7, t8;        // tone results
 float av, f, t;                 // average of min buckets, meter force, max tone
@@ -731,6 +736,8 @@ int det;                        // cw mark space detect
 int new_loc, c;                 // raw new meter needle location, color of needle changes mark/space
 static int count;               // mark,space counts
 static float rav;               // running average of signals
+
+   if( mode_menu_data.current != 1 ) return 1;   // skip this and run the waterfalls when not CW mode
    
    if( tone700.available() == 0 ) return 0;      // should run at 10ms rate
    t7 = tone700.read();
@@ -777,8 +784,8 @@ static float rav;               // running average of signals
    det = cw_denoise( det );
 
    // debug arduino graph values to see signals
-   Serial.print( 10*t ); Serial.write(' '); Serial.print(10*rav); Serial.write(' ');
-   Serial.write(' '); Serial.println(det);
+   //Serial.print( 10*t ); Serial.write(' '); Serial.print(10*rav); Serial.write(' ');
+   //Serial.write(' '); Serial.println(det);
 
 
    if( det ){                // marking
@@ -808,7 +815,6 @@ static float rav;               // running average of signals
    else c = EGA[12];
 
 // !!! inhibit these writes if position and color are same as last time
-// !!! and consider only showing when in cw sdr mode
 // void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color);
    if( screen_owner == DECODE ){
       tft.drawFastVLine(290+loc-2,40,12,0);    // erase like a sprite
@@ -995,7 +1001,7 @@ static int eees;
 
 
 // change the qcx frequency when changing modes to remain on the same frequency
-// bfo offset changes
+// needed due to receiving on an IF freq instead of baseband
 // sometimes qcx doesn't change freq, maybe will be better when I flash the new version
 void qsy_mode(int old_mode, int new_mode ){
 int32_t freq;
@@ -1035,18 +1041,18 @@ char buf2[33];
 }
 
 // avoid overload.  This looks at 40khz of signal on USB and LSB so not a replacement for AGC
-// both sideband signals feed the bandscope even if not listened to
+// this basically keeps the audio processing out of saturation ( +-32767 ).
 void auto_atn(){           // lower front end gain if signals approach overload
 static uint32_t tm;        
 static int no_chg_cnt;     // slowly raise gain
 
    if( millis() - tm < 10 ) return;
    if( peak1.available() == 0 ) return;
-   if( peak2.available() == 0 ) return;
+   //if( peak2.available() == 0 ) return;
    ++no_chg_cnt;
    tm = millis();
    
-   if( peak_atn > 0 && (peak1.read() > 0.9 || peak2.read() > 0.9) ){    // lower gain on strong signal
+   if( peak_atn > 0 && (peak1.read() > 0.9 /*|| peak2.read() > 0.9*/) ){    // lower gain on strong signal
        --peak_atn;
        codec.lineInLevel(peak_atn);
        vfo_mode_disp();
@@ -1071,6 +1077,7 @@ static float sig;
 static int hang;
 float reading;
 int ch;
+float digital_gain = 1.0 , digital_target;
 
    if( millis() - tm < 1 ) return;      // working at 1000hz
    if( rms1.available() == 0 ) return;
@@ -1082,17 +1089,28 @@ int ch;
        sig = sig + 0.001;
        ch = 1;
        hang = 0;
+       if( digital_gain > 1.0 ) digital_gain -= 0.01;
    }
    else if( sig > AGC_FLOOR && hang++ > AGC_HANG ){    // decay
        sig = sig - 0.00005;
        ch = 1;
    }
+   digital_target  = map( peak_atn, 0, 15, 312, 24 );     // voltage ratio due to front end attenuation
+   digital_target = digital_target / 24.0;                // what the signal would be without the attenuator
+   if( sig <= AGC_FLOOR && digital_gain != digital_target ){
+       if( digital_target > digital_gain + 0.02 ) digital_gain += 0.001, ch = 1;
+       if( digital_target < digital_gain - 0.02 ) digital_gain -= 0.001, ch = 1;
+   }
 
+
+   
    if( ch ){
+    // any loud signal on bandscope +-20khz can lower the signal levels of the desired signal
+    // compensate with digital gain in the later stages.
      agc_gain = sig - AGC_FLOOR;
      agc_gain = agc_gain * AGC_SLOPE;
-     agc_gain = 1.0 - agc_gain;     
-     ModeSelect.gain(mux_selected,agc_gain);
+     agc_gain = digital_gain - agc_gain;                // digital gain is 1.0 when no attenuation 
+     ModeSelect.gain(mux_selected,agc_gain);            // which is when analog gain is 15
      //if( vfo_mode & VFO_AM ) ModeSelect.gain(0,agc_gain);
      //else ModeSelect.gain(1,agc_gain);
        // Serial.println(agc_gain);
@@ -1157,8 +1175,8 @@ float ftemp;
       tft.print("40");
    }
 
-   tvalue = rms_value/agc_gain;                // what the signal would be without the agc
-   ftemp  = map( peak_atn, 0, 15, 312, 24 );   // voltage ratio due to front end attenuation
+   tvalue = rms_value/agc_gain;                // what the signal would be without the agc 
+   ftemp  = map( peak_atn, 0, 15, 312, 24 );   // voltage ratio due to front end attenuation 
    tvalue = ftemp * tvalue / 24.0;             // what the signal would be without the attenuator
    tvalue *= 160;                              // fudge factor scaling to make it look good
    tvalue = log10(tvalue);
@@ -1168,7 +1186,6 @@ float ftemp;
    //angle = map( svalue*10, 1, 120, 1350, 450 );    // S1 to S12 mapped to 90 deg +- 45 scaled by 10.
    angle = map( svalue * 100, 1, 300, 13500, 4500 );   // more fudging
    angle /= 100.0;
-  // Serial.println(angle);         // !!! debug, remove
    if( angle < 45 ) angle = 45;
    if( angle > 135 ) angle = 135;
 
@@ -1892,6 +1909,51 @@ static uint8_t dashline;
     return r;
 }
 
+// see if we can improve speed of the waterfall processing from about 5ms to ____ new value
+// new algorithm scrolls the data by writing to a different line each time and uses less time
+// per call by breaking up the screen writes into 64 separate writes. 
+void USBwaterfall(){
+static uint8_t data[64][64];
+static int line;                  // working line
+static int pline;                 // printing line
+static int ppos;                  // where to print
+static int state;                 // calculating state or printing state
+int i,j;
+uint8_t *p;
+uint8_t d;
+
+    if( screen_owner != DECODE ) return;
+    if( state == 0 ){
+       if( USBscope.available() == 0 ) return;
+    
+       // get fft result and convert to 4 bits per pixel
+       j = 0;
+       for( i = 0; i < 64; ++i ){
+          d = log2( USBscope.read(j),j );
+          ++j;
+          data[line][i] = d << 4;
+          d = log2( USBscope.read(j),j );
+          ++j;
+          data[line][i] |= d;  
+       }
+       pline = line;                  // 1st line to print
+       if( --line < 0 ) line = 63;    // scroll data by writing to a new line next time
+       ppos = 0;                      // position to print
+       state = 1;                     // change to print mode
+    }
+    else{
+    // display on screen one line per function call
+       p = &data[pline][0];
+       tft.writeRect4BPP( 131,64+ppos,128,1,p,WF );
+       ++ppos;                              // next position
+       if( ++pline > 63 ) pline = 0;        // next data line to print
+       if( pline == line ) state = 0;       // done, back to looking for new data
+    }
+
+     //writeRect4BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette );
+}
+
+/*
 void USBwaterfall(){
 static uint8_t data[64][64];
 int i,j;
@@ -1921,36 +1983,46 @@ uint8_t d;
     tft.writeRect4BPP( 131,64,128,64,p,WF );
   
 }
+*/
 
 
 void LSBwaterfall(){
 static uint8_t data[64][64];
+static int line;                  // working line
+static int pline;                 // printing line
+static int ppos;                  // where to print
+static int state;                 // calculating state or printing state
 int i,j;
 uint8_t *p;
 uint8_t d;
 
-    if( LSBscope.available() == 0 ) return;
     if( screen_owner != DECODE ) return;
+    if( state == 0 ){
+       if( LSBscope.available() == 0 ) return;
     
-    // scroll the data the most obvious and probably slowest way
-    for( i = 63; i > 0; --i ){
-        for( j = 0; j < 64; ++j ) data[i][j] = data[i-1][j];
+       // get fft result and convert to 4 bits
+       j = 127;
+       for( i = 0; i < 64; ++i ){
+          d = log2( LSBscope.read(j),-j );      // neg j for lower sideband bandwidth edges
+          --j;
+          data[line][i] = d << 4;
+          d = log2( LSBscope.read(j),-j );
+          --j;
+          data[line][i] |= d;  
+       }
+       pline = line;                  // 1st line to print
+       if( --line < 0 ) line = 63;    // scroll data by writing to a new line next time
+       ppos = 0;                      // position to print
+       state = 1;                     // change to print mode
     }
-    // get fft result and convert to 4 bits
-    j = 127;
-    for( i = 0; i < 64; ++i ){
-       d = log2( LSBscope.read(j),-j );      // neg j for lower sideband bandwidth edges
-       --j;
-       data[0][i] = d << 4;
-       d = log2( LSBscope.read(j),-j );
-       --j;
-       data[0][i] |= d;  
+    else{
+    // display on screen one line per function call
+       p = &data[pline][0];                 //    tft.writeRect4BPP( 130-126,64,128,64,p,WF );
+       tft.writeRect4BPP( 130-126,64+ppos,128,1,p,WF );
+       ++ppos;                              // next position
+       if( ++pline > 63 ) pline = 0;        // next data line to print
+       if( pline == line ) state = 0;       // done, back to looking for new data
     }
-
-    // display on screen
-    p = &data[0][0];
-    tft.writeRect4BPP( 130-126,64,128,64,p,WF );
-
 
 /*
     static unsigned int c = 0;
