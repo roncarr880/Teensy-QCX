@@ -7,8 +7,7 @@
  *   A note:  putting capacitors in C4 C7 caused the front end to pick up screen draw noise.  Line In is
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
- * to work on
- *   Add a decoder menu. 
+ * to work on 
  *   Wire a fet to switch dit or dah to ground for hellschreiber
  *   make a hole in the top case
  *   Add a USB external wire for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
@@ -36,7 +35,7 @@ be updated with some of these features.  The Weaver version looks promising for 
 
 Change log:
   Added a CW tuning indicator.
-  Lower the 1100 hz filter for CW work.  Trying a 800hz lowpass.
+  Lower the 1100 hz filter for CW work.  Trying a 900hz lowpass.
   Added a separate CW decoder for SDR CW mode.  Had some trouble with the audio library Tone objects
      returning zero. Added an audio object with a gain of 10 and some workaround code.
   Move SDR CW mode to the IF to get away from the baseband noise.
@@ -321,14 +320,29 @@ const char w_3300[] =   " 3300";
 const char w_3000[] =   " 3000";
 const char w_2700[] =   " 2700";
 const char w_2400[] =   " 2400";
-const char w_1100[] =   " 800";
+const char w_1100[] =   " 900";
 struct menu band_width_menu_data = {
    { "Band Width" },
    { w_6k, w_4k,  w_3600, w_3300, w_3000, w_2700, w_2400, w_1100 },
-   { 6000, 4500, 3600, 3300, 3000, 2700, 2400, 800 },
+   { 6000, 4500, 3600, 3300, 3000, 2700, 2400, 900 },
    48,
    ILI9341_PURPLE,
    4
+};
+
+#define DSMETER 0
+#define DCW 1
+#define DHELL 2
+const char d_smeter[] = "S Meter";
+const char d_cw[]     = " CW";
+const char d_hell[]   = "F Hell";
+struct menu decode_menu_data = {
+   {"Decode Mode"},
+   { d_smeter, d_cw, d_hell },
+   { DSMETER, DCW, DHELL, -1, -1, -1, -1, -1 },
+   48,
+   ILI9341_PURPLE,
+   0
 };
 
 int ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
@@ -360,6 +374,12 @@ int cread_buf[16];
 int cread_indx;
 int dah_table[8];
 int dah_in;
+
+// Feld Hell - make double use of the rms1 signal level
+IntervalTimer RXsigs;
+float rms_buf[8];
+int rms_in;
+int rms_out;
 
 /********************************************************************************/
 
@@ -408,7 +428,7 @@ int i,j,r,g,b;
   codec.inputSelect( AUDIO_INPUT_LINEIN );
   // codec analog gains  
   codec.lineInLevel(15);                    // 0 to 15, used as attenuator, 3.12v to 0.24v
-  codec.lineOutLevel(30);                   // 13 to 31 with 13 the loudest. 3.16v to 1.16v
+  codec.lineOutLevel(28);                   // 13 to 31 with 13 the loudest. 3.16v to 1.16v, was 30
   //codec.adcHighPassFilterDisable();         // less noise ? don't notice any change
   //codec.adcHighPassFilterFreeze();          // try this one
                                              
@@ -456,9 +476,19 @@ int i,j,r,g,b;
 
   amp1.gain(10.0);                         // will this avoid zero's being returned by tone objects?
                                            // no, but seems to help
+  RXsigs.begin( RXfun, 4081.632653 );            // Feld Hell half pixel rate                                         
 
 }
 
+
+// timer interrupt at Feld Hell rate
+void RXfun(){
+  
+    rms_buf[rms_in++] = rms1.read();
+    rms_in &= 7;
+
+    // !!! expand this function for Feld Hell transmiting
+}
 
 
 // touch the screen top,middle,bottom to bring up different menus.  Assign menu_dispatch.
@@ -483,6 +513,10 @@ int32_t  yt, xt;
    else if( yt > 190 && xt > 270 && (vfo_mode & VFO_CW) ){  // keyboard CW sending
       menu_dispatch = &key_tx;
       key_tx(0);
+   }
+   else if( yt > 140 ){
+      menu_display( &decode_menu_data );
+      menu_dispatch = &decode_menu;
    }
                            
    else menu_cleanup();                  // not active part of the screen, return to normal op.
@@ -592,7 +626,14 @@ int sel;
 }
 
 void decode_menu( int32_t t ){
+int sel;
+
+    sel = touch_decode( t, decode_menu_data.y_size );
+    if( decode_menu_data.param[sel] != -1 ){
+        decode_menu_data.current = decode_menu_data.param[sel];
+    }
   
+  menu_cleanup();
 }
 
 // I2S audio sometimes starts with I and Q out of order
@@ -715,10 +756,16 @@ int32_t t;
    LSBwaterfall();
    
    auto_atn();             // front end gain reduction if rcv very loud signals
-   agc();
+
+   if( rms_out != rms_in ){                  // agc, smeter, and Feld Hell RX data stream
+      rms_value = rms_buf[rms_out++];
+      rms_out &= 7;
+      agc();
+      smeter();
+   }
 
    cw_tune();
-   if( mode_menu_data.current == 1 ) code_read();   // run SDR cw decoder
+   if( decode_menu_data.current == DCW ) code_read(); 
    
    // balance_schmoo();    // !!! testing
 }
@@ -737,7 +784,7 @@ int new_loc, c;                 // raw new meter needle location, color of needl
 static int count;               // mark,space counts
 static float rav;               // running average of signals
 
-   if( mode_menu_data.current != 1 ) return 1;   // skip this and run the waterfalls when not CW mode
+   //if( mode_menu_data.current != 1 ) return 1;
    
    if( tone700.available() == 0 ) return 0;      // should run at 10ms rate
    t7 = tone700.read();
@@ -777,8 +824,12 @@ static float rav;               // running average of signals
    }
 
    av = (t6+t7+t8-t/2.0)/3.0;
-   rav = 15.0*rav + av;
-   rav /= 16.0;
+  // rav = 15.0*rav + av;
+  // rav /= 16.0;
+   rav = 31.0*rav + av;     // try a longer time constant here.  Maybe shorter for faster code and
+   rav /= 32.0;             // longer for slower code would work best to avoid noise in between characters.
+                            // trade off for fast fading signals being lost with longer constant.
+   
    det = ( t > 2.0*rav ) ? 1 : 0;       //2.0 - 3.0  noise to ok
 
    det = cw_denoise( det );
@@ -926,7 +977,8 @@ static int farns,ch_count;
 static int eees;
 
    if( cread_indx < 2 ) return;    // need at least one mark and one space in order to decode something
-   if( screen_owner != DECODE ) return; 
+   if( screen_owner != DECODE ) return;
+   if( decode_menu_data.current != DCW ) return;
    
    /* find slicer from dah table */
    slicer= 0;   force= 0;
@@ -976,7 +1028,7 @@ static int eees;
  
    if( m_ch ){   /* found something so print it */
       ++ch_count;
-      if( m_ch == 'E' ) ++eees;         // just noise ?
+      if( m_ch == 'E' || m_ch == 'I' ) ++eees;         // just noise ?
       else eees = 0;
       if( eees < 5 ) decode_print(m_ch);
       if( cread_buf[ls] > 3*slicer + farns ){   // check for word space
@@ -1072,19 +1124,20 @@ static int no_chg_cnt;     // slowly raise gain
 #define AGC_SLOPE 6.0       //  8.0
 #define AGC_HANG 300
 void agc(){
-static uint32_t tm;
+// static uint32_t tm;
 static float sig;
 static int hang;
 float reading;
 int ch;
 float digital_gain = 1.0 , digital_target;
 
-   if( millis() - tm < 1 ) return;      // working at 1000hz
-   if( rms1.available() == 0 ) return;
-   tm = millis();
+  // if( millis() - tm < 1 ) return;      // working at 1000hz
+  // if( rms1.available() == 0 ) return;
+  // tm = millis();
 
+   reading = rms_value;
    ch = 0;
-   rms_value = reading = rms1.read();
+     /// rms_value = reading = rms1.read();
    if( reading > sig && reading > AGC_FLOOR ){         // attack
        sig = sig + 0.001;
        ch = 1;
@@ -1122,9 +1175,6 @@ float digital_gain = 1.0 , digital_target;
         tft.print(sig); 
      } 
    }
-
-   smeter();
-  
 }
 
 
@@ -1138,7 +1188,7 @@ int diff;
 float tvalue;
 float ftemp;
 
-   if( screen_owner != DECODE || (vfo_mode & VFO_CW) ){       // show the meter ?
+   if( screen_owner != DECODE || decode_menu_data.current != DSMETER ){       // not show the meter ?
       onscreen = 0;
       return;
    }
@@ -1173,6 +1223,7 @@ float ftemp;
       tft.print("20");
       tft.setCursor(250,ybase-100);
       tft.print("40");
+      lastx = 160,lasty = 239;+
    }
 
    tvalue = rms_value/agc_gain;                // what the signal would be without the agc 
