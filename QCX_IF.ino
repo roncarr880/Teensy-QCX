@@ -762,6 +762,7 @@ int32_t t;
       rms_out &= 7;
       agc();
       smeter();
+      rx_hell();
    }
 
    cw_tune();
@@ -1177,6 +1178,51 @@ float digital_gain = 1.0 , digital_target;
    }
 }
 
+// paint the screen with feld hell receive 
+void rx_hell(){
+static uint8_t  data[28][4];      // try 8 columns each write, packed into 4 wide data
+uint8_t  *p;
+static int16_t prow,pcolumn;          // 4 rows 80 writes of 4 colums for 320 pixels, lose one pixel row at bottom.
+//static int pixel;
+static int row = 13, col = 0;     // first pixel position
+static float base;                // average signals 
+float sig;
+int  sigi;
+
+  if( screen_owner != DECODE || decode_menu_data.current != DHELL ) return;
+
+  base = 255.0*base + rms_value;               // 128 maybe ok
+  base /= 256.0;
+
+  sig = ( rms_value/base ) * 16 - 16;          // contrast and base color as white
+  sig = 16 - sig;
+  sigi = sig;
+//Serial.print( sigi );  Serial.write(' ');  
+  sigi = constrain( sigi, 0, 15 );
+  if( (col & 1) == 0 ){                      // pack 4 bits per pixel and duplicate for print
+    data[row][col/2] = sigi << 4;
+    data[row+14][col/2] = sigi << 4;
+  }
+  else{
+    data[row][col/2] |= sigi;
+    data[row+14][col/2] |= sigi;
+  }
+
+  --row;
+ // ++pixel;
+  if( row < 0 ) row = 13, ++col;  // pixel = 0;
+  if( col >= 8 ){
+     p = &data[0][0];
+     //writeRect4BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette );
+     tft.writeRect4BPP( pcolumn, 128+28*prow, 8, 28, p, GRAY );
+     col = 0;
+     pcolumn += 8;
+     if( pcolumn >= 319 ) pcolumn = 0, prow += 1;
+     if( prow >= 4 ) prow = 0;
+  }
+   
+}
+
 
 #define ybase 250              // vertical position of all
 void smeter(){
@@ -1223,7 +1269,7 @@ float ftemp;
       tft.print("20");
       tft.setCursor(250,ybase-100);
       tft.print("40");
-      lastx = 160,lasty = 239;+
+      lastx = 160,lasty = 239;
    }
 
    tvalue = rms_value/agc_gain;                // what the signal would be without the agc 
