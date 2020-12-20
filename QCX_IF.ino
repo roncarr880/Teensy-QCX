@@ -8,12 +8,17 @@
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
  * to work on 
+ *   Choose a bfo placement on the roofing filter. Maybe use different placement for CW vs SSB.
+ *   Change one of the low pass filters to bandpass for Narrow band modes.
+ *   Add manual attenuation
  *   Wire a fet to switch dit or dah to ground for hellschreiber
+ *   Hellschrieber TX
  *   make a hole in the top case
- *   Add a USB external wire for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
+ *   Add an external cable for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
  *   RTTY, PSK31 decoders - software only
- *   Hellschrieber RX and TX
- *   Could disable Audio objects when they are not in use (example AM detector, Tone detectors, Roof filter)   
+ *   Could disable Audio objects when they are not in use (example AM detector, Tone detectors, Roof filter)  
+ *   Add a couple of message buffers, or read a couple from the QCX and put them on the keyboard to send in
+ *      whatever mode is in use.
  *   
      
    Free pins when using audio board and display.
@@ -278,7 +283,7 @@ char kb[5][10] = {
    { 'Q','W','E','R','T','Y','U','I','O','P' },
    { 'A','S','D','F','G','H','J','K','L', 8 },      // 8 is backspace char
    { 'Z','X','C','V','B','N','M',',','.','/' },
-   { '*','*',' ',' ','?','=',' ',' ',' ',' ' }
+   { '*','*',' ','#','?','=',' ',' ',' ',' ' }
 };
 
 // Menu's
@@ -380,6 +385,11 @@ IntervalTimer RXsigs;
 float rms_buf[8];
 int rms_in;
 int rms_out;
+
+// 4 line Feld Hell display or a larger easier to read 3 line display that borrows some waterfall space, pick one
+#define USE_3_LINE
+// #define USE_4_LINE
+
 
 /********************************************************************************/
 
@@ -1168,16 +1178,19 @@ float digital_gain = 1.0 , digital_target;
      //if( vfo_mode & VFO_AM ) ModeSelect.gain(0,agc_gain);
      //else ModeSelect.gain(1,agc_gain);
        // Serial.println(agc_gain);
-     if( screen_owner == DECODE ){           // maybe move this to vfo_mode_disp ?
-        tft.setTextSize(1);                  // maybe not as this changes often, why re-write all the info
+
+     if( screen_owner == DECODE && decode_menu_data.current != DHELL ){
+        tft.setTextSize(1); 
         tft.setTextColor(EGA[14],0);
         tft.setCursor(262,114);  
         tft.print("Sig: ");
         tft.print(sig); 
-     } 
+     }
    }
 }
 
+
+#ifdef USE_4_LINE
 // paint the screen with feld hell receive 
 void rx_hell(){
 static uint8_t  data[28][4];      // try 8 columns each write, packed into 4 wide data
@@ -1222,6 +1235,88 @@ int  sigi;
   }
    
 }
+#endif
+
+#ifdef USE_3_LINE
+
+//  .25 lowpass, no window
+const float fh_k[14] = {
+-0.023146590714119390,
+-0.053367438848668208,
+-0.049667786106291537,
+ 0.004798037517529520,
+ 0.101060536773946719,
+ 0.204651121687276810,
+ 0.271600842184059443,
+ 0.271600842184059443,
+ 0.204651121687276810,
+ 0.101060536773946719,
+ 0.004798037517529520,
+-0.049667786106291537,
+-0.053367438848668208,
+-0.023146590714119390
+};
+
+
+// 42 pixel high double line print, interpolate by 3, decimate by 2, 1.5X speed increase
+// need to borrow 14 rows of pixels from the waterfall for this version
+void rx_hell(){
+static float dline[14];
+static int deci;
+int i,j;
+float sum;
+  
+    if( screen_owner != DECODE || decode_menu_data.current != DHELL ) return;
+    
+    for( i = 0; i < 3; ++i ){                                // sample rate * 3
+       for( j = 0; j < 13; ++j ) dline[j] = dline[j+1];      // move delay line
+       dline[13] = ( i == 0 ) ? rms_value : 0.0 ;            // sample at end
+       sum = 0;
+       for( j = 0; j < 14; ++j ) sum += dline[j] * fh_k[j];  // mult and add FIR filter
+       deci ^= 1;
+       if( deci ) rx_hell3( sum );                           // decimate by 2      
+    }
+}
+
+void rx_hell3( float val ){
+static uint8_t  data[42][4];      // try 8 columns each write, packed into 4 wide data
+uint8_t  *p;
+static int16_t prow,pcolumn;      // 4 rows 80 writes of 4 colums for 320 pixels
+static int row = 20, col = 0;     // first pixel position
+static float base;                // average signals 
+float sig;
+int  sigi;
+
+  base = 255.0*base + val;               // 128 maybe ok
+  base /= 256.0;
+
+  sig = ( val/base ) * 16 - 16;          // contrast and base color as white
+  sig = 16 - sig;
+  sigi = sig;
+//Serial.print( sigi );  Serial.write(' ');  
+  sigi = constrain( sigi, 0, 15 );
+  if( (col & 1) == 0 ){                      // pack 4 bits per pixel and duplicate for print
+    data[row][col/2] = sigi << 4;
+    data[row+21][col/2] = sigi << 4;
+  }
+  else{
+    data[row][col/2] |= sigi;
+    data[row+21][col/2] |= sigi;
+  }
+
+  --row;
+  if( row < 0 ) row = 20, ++col;  // pixel = 0;
+  if( col >= 8 ){
+     p = &data[0][0];
+     //writeRect4BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette );
+     tft.writeRect4BPP( pcolumn, 114+42*prow, 8, 42, p, GRAY );
+     col = 0;
+     pcolumn += 8;
+     if( pcolumn >= 319 ) pcolumn = 0, prow += 1;
+     if( prow >= 3 ) prow = 0;
+  }  
+}
+#endif
 
 
 #define ybase 250              // vertical position of all
@@ -1459,8 +1554,10 @@ int u,l,c,m;
     
    tft.drawLine(0,61,319,61,EGA[4]);      
    tft.drawLine(0,62,319,62,EGA[4]);
-   tft.drawLine(0,128,319,128,EGA[4]);
-   tft.drawLine(0,129,319,129,EGA[4]);
+   if( decode_menu_data.current != DHELL ){
+      tft.drawLine(0,128,319,128,EGA[4]);
+      tft.drawLine(0,129,319,129,EGA[4]);
+   }
   
 
    PhaseChange(0);           // just print current value
@@ -2045,6 +2142,9 @@ uint8_t d;
        ++ppos;                              // next position
        if( ++pline > 63 ) pline = 0;        // next data line to print
        if( pline == line ) state = 0;       // done, back to looking for new data
+       #ifdef USE_3_LINE
+       if( ppos == 64-14 && decode_menu_data.current == DHELL ) state = 0;
+       #endif
     }
 
      //writeRect4BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette );
@@ -2119,6 +2219,9 @@ uint8_t d;
        ++ppos;                              // next position
        if( ++pline > 63 ) pline = 0;        // next data line to print
        if( pline == line ) state = 0;       // done, back to looking for new data
+       #ifdef USE_3_LINE
+       if( ppos == 64-14 && decode_menu_data.current == DHELL ) state = 0;    // borrow 14 lines
+       #endif
     }
 
 /*
