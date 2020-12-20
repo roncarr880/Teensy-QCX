@@ -11,8 +11,6 @@
  *   Choose a bfo placement on the roofing filter. Maybe use different placement for CW vs SSB.
  *   Change one of the low pass filters to bandpass for Narrow band modes.
  *   Add manual attenuation
- *   Wire a fet to switch dit or dah to ground for hellschreiber
- *   Hellschrieber TX
  *   make a hole in the top case
  *   Add an external cable for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
  *   RTTY, PSK31 decoders - software only
@@ -26,7 +24,7 @@
    
   0,1    used for Serial1  Rx, Tx
   2      mute switch 
-  3 
+  3      key ( PPS )
   4
   5
   8      used for touch CS
@@ -67,8 +65,10 @@ Change log:
 
 #include "hilbert_IF.h"
 #include "my_morse.h"           // morse and baudot tables
+#include "helldefs.h"
 
 #define QCX_MUTE 2              // pin 2 high mutes qcx audio
+#define QCX_KEY  3              // keys PPS via BS170 FET
 
 
 // peak1 used to avoid exceeding int16 size in the usb,lsb adders.
@@ -365,8 +365,8 @@ float svalue;
 float rms_value;
 
 // keyboard transmit
-#define TBUFSIZE  16
-char tbuf[TBUFSIZE];            // power of two buffer
+#define TBUFSIZE  64
+char tbuf[TBUFSIZE];            // power of two buffer for transmit cw, hell
 int  t_in, t_out;
 int  tx_in_progress;
 
@@ -385,6 +385,9 @@ IntervalTimer RXsigs;
 float rms_buf[8];
 int rms_in;
 int rms_out;
+volatile int hflag;         // ready to feed next transmit char to Hellschreiber transmit?
+char hchar;
+int hcount;                 // number of special characters in the buffer, used for word spacing
 
 // 4 line Feld Hell display or a larger easier to read 3 line display that borrows some waterfall space, pick one
 #define USE_3_LINE
@@ -412,7 +415,9 @@ int i,j,r,g,b;
   }
 
   pinMode(QCX_MUTE,OUTPUT);
-  digitalWriteFast(QCX_MUTE,HIGH);
+  digitalWriteFast(QCX_MUTE,HIGH);       // mute QCX, start in SDR mode
+  pinMode(QCX_KEY,OUTPUT);
+  digitalWriteFast(QCX_KEY,LOW);         // RX mode
   
   tft.begin();
   tft.fillScreen(ILI9341_BLACK);
@@ -486,18 +491,55 @@ int i,j,r,g,b;
 
   amp1.gain(10.0);                         // will this avoid zero's being returned by tone objects?
                                            // no, but seems to help
-  RXsigs.begin( RXfun, 4081.632653 );            // Feld Hell half pixel rate                                         
+  RXsigs.begin( RXfun, 4081.632653 );      // Feld Hell half pixel rate                                         
 
 }
 
 
-// timer interrupt at Feld Hell rate
+// timer interrupt at Feld Hell half pixel rate
 void RXfun(){
+static int row = 0;
+static int col = 1;
+static int state = 0;
+static struct HELFONT hc;
+
   
     rms_buf[rms_in++] = rms1.read();
     rms_in &= 7;
+    
+    if( decode_menu_data.current != DHELL ) return;
+    
+    // Feld Hell transmitting,  idle columns or send what is in the buffer
+    // function from my TenTec Rebel
+     switch ( state ){
+     case 0:         /* idle a complete column, also idling during receive */
+       col <<= 1;
+       if( col == ( 1 << 14 ) ){
+          row = 0, col = 1;
+          if( hflag ){            /* check for next char during the last bit time in the column */
+             if( hchar < ' ' || hchar > 'Z' ) hc = heltab[0];     /* no good so "tx" a space */
+             else hc = heltab[hchar - ' '];                       /* look up hchar in font table */
+             state = 1;
+             hflag = 0;
+          }
+       }
+     break;
+     
+     case 1:         /* tx bit at row and column */
+       if( hc.font[row] & col ) digitalWriteFast( QCX_KEY, HIGH );  /* tx on */
+       else digitalWriteFast( QCX_KEY, LOW );                       /* tx off */
+       col <<= 1;
+       if( col == ( 1 << 14 )) col= 1,  ++row;
+       if( row > 4 ) col = 1, state = 2;
+     break;
+   
+     case 2:      /* idle a complete column */
+       col <<= 1;
+       if( col == ( 1 << 14 )) col= 1,  state = 0;
+     break;
+  } 
 
-    // !!! expand this function for Feld Hell transmiting
+    
 }
 
 
@@ -741,7 +783,8 @@ int32_t t;
                       //  else cat.print("TB0;");  keep enabled but don't get the info unless CW mode
                       break;   // enable/disable decode flag
               case 9: if( screen_owner == DECODE && (mode_menu_data.current == 0 ) ) cat.print("TB;");
-                      break;        
+                      break;
+              case 11: cat.print("KS;");  break;              
          }
          ++c_state;
          c_state &= 15;
@@ -777,6 +820,15 @@ int32_t t;
 
    cw_tune();
    if( decode_menu_data.current == DCW ) code_read(); 
+
+   // Feld Hell transmit, feed the next char to the Hell transmit process
+   if( decode_menu_data.current == DHELL && hflag == 0 && t_out != t_in && hcount){
+      hchar = tbuf[t_out++];
+      if( hchar < 'A' ) --hcount;
+      if( hcount < 0 ) hcount = 0;
+      hflag = 1;
+      t_out &= ( TBUFSIZE-1);
+   }
    
    // balance_schmoo();    // !!! testing
 }
@@ -1462,6 +1514,7 @@ static int pos;
       tft.write( c );
       buff[2][pos] = c;
       tbuf[t_in++] = c;
+      if( c < 'A' && decode_menu_data.current == DHELL ) ++hcount;
       t_in &= (TBUFSIZE-1);
       cat.print("KY;");
    }
@@ -1807,6 +1860,7 @@ char c;
     if( response[0] == 'Q' && response[1] == 'U' ) cat_qu_flags();
     if( response[0] == 'T' && response[1] == 'B' ) cat_decode();
     if( response[0] == 'K' && response[1] == 'Y' ) cat_transmit();
+    if( response[0] == 'K' && response[1] == 'S' ) cat_keyspeed();
 
     len = 0;     // reset string to start for next command
 }
@@ -1814,6 +1868,7 @@ char c;
 
 void cat_transmit(){    // sending via the touch keyboard
 
+   if( decode_menu_data.current == DHELL ) return;     // not in CW mode
    if( response[2] == '1' ) tx_in_progress = 1;
    else{
        tx_in_progress = 0;
@@ -1905,6 +1960,29 @@ void cat_qu_flags(){                       // process the qu flags response
 
   qu_flags |= atoi(&response[2]);             // merge new flags
   qu_flags &= (QUFA + QUFB + QUIF + QUTB);    // clear unused flags
+}
+
+//  force straight key mode for Feld Hell mode by setting keyer speed to zero
+//  to use a physical straight key, must set the straight key mode in the QCX menu system
+void cat_keyspeed(){
+static int kspeed;
+int ks;
+char buf[30];
+
+   ks = atoi(&response[2]);
+   if( decode_menu_data.current == DHELL ){
+     if( ks != 0 ) cat.print("KS0;");         // set to straight key mode
+   }
+   else{                                      // normal mode, save result or return to normal
+     if( ks != 0 ) kspeed = ks;
+     else{                                    // no longer in Hellschreiber mode, set previous speed
+         strcpy( buf,"KS" );
+         itoa( kspeed, &buf[2], 10 );
+         if( buf[3] == 0 ) buf[3] = ';', buf[4] = 0;
+         else buf[4] = ';', buf[5] = 0;
+         cat.print(buf);
+     }
+   }
 }
 
 void cat_freq( int32_t *vfo ){             // update a vfo from cat response
