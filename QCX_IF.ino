@@ -7,13 +7,14 @@
  *   A note:  putting capacitors in C4 C7 caused the front end to pick up screen draw noise.  Line In is
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
- * to work on 
+ * to work on
+ *   Consider changing what determines the mode we are in, decode, vfo_mode or what?
  *   Choose a bfo placement on the roofing filter. Maybe use different placement for CW vs SSB.
  *   Change one of the low pass filters to bandpass for Narrow band modes.
  *   Add manual attenuation
  *   make a hole in the top case
  *   Add an external cable for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
- *   RTTY, PSK31 decoders - software only
+ *   RTTY, PSK31 decoders - software only.  Low priority as will not be transmitting these modes.
  *   Could disable Audio objects when they are not in use (example AM detector, Tone detectors, Roof filter)  
  *   Add a couple of message buffers, or read a couple from the QCX and put them on the keyboard to send in
  *      whatever mode is in use.
@@ -393,6 +394,9 @@ int hcount;                 // number of special characters in the buffer, used 
 #define USE_3_LINE
 // #define USE_4_LINE
 
+#define MSG_BUF_SIZE  500
+char msg_buf[MSG_BUF_SIZE];         // one big buffer for 12 QCX messages stored serially
+int  messages[12];                  // index of message in the buffer
 
 /********************************************************************************/
 
@@ -491,7 +495,12 @@ int i,j,r,g,b;
 
   amp1.gain(10.0);                         // will this avoid zero's being returned by tone objects?
                                            // no, but seems to help
-  RXsigs.begin( RXfun, 4081.632653 );      // Feld Hell half pixel rate                                         
+  RXsigs.begin( RXfun, 4081.632653 );      // Feld Hell half pixel rate
+
+  message_query();                         // read out the stored messages for local use
+
+  delay(5000);                             // view any bootup messages
+  tft.fillScreen(ILI9341_BLACK);           // clean up the screen again
 
 }
 
@@ -1516,7 +1525,7 @@ static int pos;
       tbuf[t_in++] = c;
       if( c < 'A' && decode_menu_data.current == DHELL ) ++hcount;
       t_in &= (TBUFSIZE-1);
-      cat.print("KY;");
+      if( decode_menu_data.current != DHELL ) cat.print("KY;");      // cw mode, check if ok to send more data
    }
 
    if( c == '*' ){
@@ -1861,8 +1870,74 @@ char c;
     if( response[0] == 'T' && response[1] == 'B' ) cat_decode();
     if( response[0] == 'K' && response[1] == 'Y' ) cat_transmit();
     if( response[0] == 'K' && response[1] == 'S' ) cat_keyspeed();
+    if( response[0] == 'Q' && response[1] == 'M' ) cat_message_query();
 
     len = 0;     // reset string to start for next command
+}
+
+// setup function, query the QCX for the stored messages
+void message_query(){
+int i, trys,j;
+char cmd[20];
+
+   delay(1000);                      // allow qcx to boot up
+   tft.setCursor(0,0);
+   tft.setTextSize(1);
+   tft.setTextColor(ILI9341_WHITE);
+   strcpy( cmd, "QM2.01;" );
+   for( i = 0;  i < 12; ++i ){      // attempt 3 times to read out each stored message from QCX
+       messages[i] = -1;
+       if( i < 7 ) cmd[5] = i + '3';
+       else cmd[4] = '1', cmd[5] = (i+3)%10 + '0';
+       for( trys = 0; trys < 3; ++trys ){
+          cat.print(cmd);
+            //Serial.print(cmd);    Serial.write(' ');  
+          for( j = 0; j < 1000; ++j ){
+              delay(1);
+              radio_control();
+              if( messages[i] != -1 ) break;  
+          }
+          if( messages[i] != -1 ) break;
+       }
+   }
+}
+
+void cat_message_query(){      // save the QCX message to local storage array
+static int bufin;
+int i,j;
+char c;
+
+   tft.println(response);
+   // Serial.println(response);    //  QM26 4NAME IS RON; is a response.  Format not same as documentation
+   j = 0;   i = 0;
+   // find first space char
+   while( response[j] != ' ' ){
+      if( response[j] == 0 ) return;
+      ++j;
+   }
+   ++j;
+   while( response[j] >= '0' && response[j] <= '9'){    // get index
+      i = i * 10;
+      if( response[j] == 0 ) return;
+      i = i + response[j] - '0';
+      ++j;
+   }
+   --i;                                   // numbers start at 1, index starts at zero
+   if( i >= 12 ) return;                  // out of bounds of local array
+  // copy the message
+  //  ++j;                   // skip period  --  not in the response, maybe there in future revisions
+  messages[i] = bufin;       // save index to start of this string in the buffer
+  for(;;++j){
+      if( bufin == MSG_BUF_SIZE ){      // out of space, quit and leave string terminated
+          messages[i] = -1;
+          msg_buf[MSG_BUF_SIZE-1] = 0;
+          return;
+      }
+      c = response[j];
+      msg_buf[bufin++] = c;
+      if( c == 0 ) break;
+  }
+  
 }
 
 
