@@ -8,6 +8,7 @@
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
  * to work on
+ *   Message buffer transmit
  *   Consider changing what determines the mode we are in, decode, vfo_mode or what?
  *   Choose a bfo placement on the roofing filter. Maybe use different placement for CW vs SSB.
  *   Change one of the low pass filters to bandpass for Narrow band modes.
@@ -16,8 +17,6 @@
  *   Add an external cable for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
  *   RTTY, PSK31 decoders - software only.  Low priority as will not be transmitting these modes.
  *   Could disable Audio objects when they are not in use (example AM detector, Tone detectors, Roof filter)  
- *   Add a couple of message buffers, or read a couple from the QCX and put them on the keyboard to send in
- *      whatever mode is in use.
  *   
      
    Free pins when using audio board and display.
@@ -293,7 +292,7 @@ void (* menu_dispatch )( int32_t );    // pointer to function that is processing
 
 struct menu {
    char title[16];
-   const char *menu_item[8];    // !! be careful with the length of the strings below
+   const char *menu_item[8];    // array of pointers to strings
    int param[8];
    int y_size;                  // x size will be half the screen, two items on a line for now
    int color;
@@ -351,6 +350,20 @@ struct menu decode_menu_data = {
    0
 };
 
+#define MSG_BUF_SIZE  600           // storing 1st 8 messages, 4x100 + 4x50
+char msg_buf[MSG_BUF_SIZE];         // one big buffer
+
+struct menu qcx_message = {
+   {"Xmit Message"},
+   { &msg_buf[0], &msg_buf[100], &msg_buf[200], &msg_buf[300], &msg_buf[400], &msg_buf[450],
+     &msg_buf[500], &msg_buf[550] },
+   { -2, -2, -2, -2, -2, -2, -2, -2 },
+   45,                                      // 45 max for text size 2
+   ILI9341_NAVY,
+   0
+};
+
+
 int ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
 
 
@@ -394,9 +407,6 @@ int hcount;                 // number of special characters in the buffer, used 
 #define USE_3_LINE
 // #define USE_4_LINE
 
-#define MSG_BUF_SIZE  500
-char msg_buf[MSG_BUF_SIZE];         // one big buffer for 12 QCX messages stored serially
-int  messages[12];                  // index of message in the buffer
 
 /********************************************************************************/
 
@@ -732,6 +742,7 @@ static int val;
 
 void menu_display( struct menu *m ){    // display any of the menus on the screen
 int i,x,y;                              // other functions handle selections
+char buf[20];
 
    tft.setTextColor( ILI9341_WHITE, m->color );  // text is white on background color 
    tft.fillScreen(ILI9341_BLACK);                // border of menu items is black
@@ -752,7 +763,8 @@ int i,x,y;                              // other functions handle selections
       tft.setCursor( x+10,y+10 );
       if( i == m->current ) tft.setTextColor( ILI9341_YELLOW, m->color );
       else tft.setTextColor( ILI9341_WHITE, m->color );
-      tft.print(m->menu_item[i]);
+      strncpy(buf,m->menu_item[i],12);    buf[12] = 0;
+      tft.print(buf);
       x += 160;
       if( x >= 320 ) x = 0, y += m->y_size;
    }
@@ -1885,8 +1897,7 @@ char cmd[20];
    tft.setTextSize(1);
    tft.setTextColor(ILI9341_WHITE);
    strcpy( cmd, "QM2.01;" );
-   for( i = 0;  i < 12; ++i ){      // attempt 3 times to read out each stored message from QCX
-       messages[i] = -1;
+   for( i = 0;  i < 8; ++i ){      // attempt 3 times to read out 1st 8 stored messages from QCX
        if( i < 7 ) cmd[5] = i + '3';
        else cmd[4] = '1', cmd[5] = (i+3)%10 + '0';
        for( trys = 0; trys < 3; ++trys ){
@@ -1895,15 +1906,15 @@ char cmd[20];
           for( j = 0; j < 1000; ++j ){
               delay(1);
               radio_control();
-              if( messages[i] != -1 ) break;  
+              if( qcx_message.param[i] != -2 ) break;  
           }
-          if( messages[i] != -1 ) break;
+          if( qcx_message.param[i] != -2 ) break;
        }
    }
 }
 
 void cat_message_query(){      // save the QCX message to local storage array
-static int bufin;
+int bufin;
 int i,j;
 char c;
 
@@ -1923,13 +1934,15 @@ char c;
       ++j;
    }
    --i;                                   // numbers start at 1, index starts at zero
-   if( i >= 12 ) return;                  // out of bounds of local array
+   if( i >= 8 ) return;                   // out of bounds of local array
   // copy the message
   //  ++j;                   // skip period  --  not in the response, maybe there in future revisions
-  messages[i] = bufin;       // save index to start of this string in the buffer
+  bufin = 100 * i;           // 1st 4 are 100 characters long, rest are 50
+  if( i > 4 ) bufin = bufin - 50 * ( i-4);
+  msg_buf[bufin++] = ' ';    // preceed with a space for menu printing or appending messages
+  qcx_message.param[i] = ( response[j] == 0 ) ? -1 : 1;    // flag we found it and if it is valid
   for(;;++j){
       if( bufin == MSG_BUF_SIZE ){      // out of space, quit and leave string terminated
-          messages[i] = -1;
           msg_buf[MSG_BUF_SIZE-1] = 0;
           return;
       }
