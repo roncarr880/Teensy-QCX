@@ -8,11 +8,9 @@
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
  * to work on
- *   Message buffer transmit
- *   Consider changing what determines the mode we are in, decode, vfo_mode or what?
+ *   Replace VFO display with some 7 segment looking fonts.
  *   Choose a bfo placement on the roofing filter. Maybe use different placement for CW vs SSB.
- *   Change one of the low pass filters to bandpass for Narrow band modes.
- *   Add manual attenuation
+ *   Find correct Q for the CW Narrow band pass filter.
  *   make a hole in the top case
  *   Add an external cable for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
  *   RTTY, PSK31 decoders - software only.  Low priority as will not be transmitting these modes.
@@ -28,8 +26,8 @@
   4
   5
   8      used for touch CS
- 16      A2  
- 17      A3  
+ 16  A2  
+ 17  A3  
 
 
 Have decided to expand upon this version.  The general plan is when one chooses the QCX CW mode, you have 
@@ -52,7 +50,10 @@ Change log:
      bandwidth reduce the front end gain ( from auto attenuation in the SSB mixers when peak signals added
      approach 32767 - max value for int16_t. )
   Peak2 seems redundant, commented out its code.
-  New Waterfall algorithm for less time used per call.     
+  New Waterfall algorithm for less time used per call. Writes distributed.
+  Add Hellschreiber transmit and receive.
+  Read out 8 of the 12 QCX transmit buffers via CAT and set up a touch menu to transmit them.
+  Added manual attenuation, also changes the line-in gain on the audio board same as auto-attenuation.    
  
  *******************************************************************************/
 
@@ -131,66 +132,6 @@ AudioConnection          patchCord29(amp1, tone800);
 AudioControlSGTL5000     codec;          //xy=301,445
 // GUItool: end automatically generated code
 
-/*
-// IF version with baseband CW and CW tuning display for best decoding
-// removing the baseband CW to see if can make the vfo's track for a CW offset of 8k
-// GUItool: begin automatically generated code
-AudioInputI2S            IQ_in;          //xy=142,624
-AudioFilterFIR           PhaseI;         //xy=280,556
-AudioFilterFIR           PhaseQ;         //xy=286,722
-AudioMixer4              SSBselect;      //xy=325,1019
-AudioFilterFIR           H90plus;        //xy=438,557
-AudioFilterFIR           H00minus;       //xy=449,720
-AudioFilterFIR           SSBroof;        //xy=499,1017
-AudioMixer4              USBmixer;       //xy=620,563
-AudioMixer4              LSBmixer;       //xy=623,714
-AudioAnalyzeFFT256       LSBscope;       //xy=631,835
-AudioAnalyzeFFT256       USBscope;       //xy=634,448
-AudioSynthWaveformSine   BFO;            //xy=700,1150
-AudioEffectMultiply      Second_mixer;   //xy=708,1026
-AudioAnalyzePeak         peak2;          //xy=804,716
-AudioFilterFIR           IF12r7;         //xy=807,622
-AudioAnalyzePeak         peak1;          //xy=810,563
-AudioMixer4              ModeSelect;     //xy=899,1034
-AudioEffectRectifier     AMdet;          //xy=950,623
-AudioFilterBiquad        BandWidth;      //xy=1059,1032
-AudioAnalyzeToneDetect   tone700;          //xy=1222,1143
-AudioAnalyzeToneDetect   tone800;          //xy=1222,1191
-AudioAnalyzeToneDetect   tone600;          //xy=1223,1096
-AudioAnalyzeRMS          rms1;           //xy=1261,949
-AudioOutputI2S           LineOut;        //xy=1262,1029
-AudioConnection          patchCord1(IQ_in, 0, PhaseI, 0);
-AudioConnection          patchCord2(IQ_in, 1, PhaseQ, 0);
-AudioConnection          patchCord3(PhaseI, H90plus);
-AudioConnection          patchCord5(PhaseQ, H00minus);
-AudioConnection          patchCord7(SSBselect, SSBroof);
-AudioConnection          patchCord8(H90plus, 0, USBmixer, 1);
-AudioConnection          patchCord9(H90plus, 0, LSBmixer, 1);
-AudioConnection          patchCord10(H00minus, 0, USBmixer, 2);
-AudioConnection          patchCord11(H00minus, 0, LSBmixer, 2);
-AudioConnection          patchCord12(SSBroof, 0, Second_mixer, 0);
-AudioConnection          patchCord13(USBmixer, USBscope);
-AudioConnection          patchCord14(USBmixer, peak1);
-AudioConnection          patchCord15(USBmixer, IF12r7);
-AudioConnection          patchCord16(USBmixer, 0, SSBselect, 1);
-//AudioConnection          patchCord17(USBmixer, 0, ModeSelect, 2);   // baseband cw
-AudioConnection          patchCord18(LSBmixer, LSBscope);
-AudioConnection          patchCord19(LSBmixer, peak2);
-AudioConnection          patchCord20(LSBmixer, 0, SSBselect, 2);
-AudioConnection          patchCord21(BFO, 0, Second_mixer, 1);
-AudioConnection          patchCord22(Second_mixer, 0, ModeSelect, 1);
-AudioConnection          patchCord23(IF12r7, AMdet);
-AudioConnection          patchCord24(ModeSelect, BandWidth);
-AudioConnection          patchCord25(AMdet, 0, ModeSelect, 0);
-AudioConnection          patchCord26(BandWidth, rms1);
-AudioConnection          patchCord27(BandWidth, 0, LineOut, 0);
-AudioConnection          patchCord28(BandWidth, 0, LineOut, 1);
-AudioConnection          patchCord29(BandWidth, tone600);
-AudioConnection          patchCord30(BandWidth, tone700);
-AudioConnection          patchCord31(BandWidth, tone800);
-AudioControlSGTL5000     codec;          //xy=301,445
-// GUItool: end automatically generated code
-*/
 
 // #define USE_USB_AUDIO        // not needed for self contained radio but works really slick
                                 // with HDSDR.  Can include later.
@@ -283,7 +224,7 @@ char kb[5][10] = {
    { 'Q','W','E','R','T','Y','U','I','O','P' },
    { 'A','S','D','F','G','H','J','K','L', 8 },      // 8 is backspace char
    { 'Z','X','C','V','B','N','M',',','.','/' },
-   { '*','*',' ','#','?','=',' ',' ',' ',' ' }
+   { '*','*',' ','#','?','=',' ',' ',' ','$' }      // $ opens the messages menu, * returns to RX 
 };
 
 // Menu's
@@ -306,13 +247,13 @@ const char m_lsb[] = " LSB";
 const char m_usb[] = " USB";
 const char m_am[]  = " AM";
 const char m_sam[] = " ";
-const char m_data[]= " ";
+const char m_atn[]= " Atten";
 const char m_phase[] = "Phase";          // codec issue with samples order ( twin peaks issue )
 
 struct menu mode_menu_data = {
    { "SDR Mode" },
-   { m_qcx,m_cw,m_lsb,m_usb,m_am,m_sam,m_data,m_phase },
-   {0,1,2,3,4,-1,-1,7},
+   { m_qcx,m_cw,m_lsb,m_usb,m_am,m_sam,m_atn,m_phase },
+   {0,1,2,3,4,-1,6,7},
    48,
    ILI9341_PURPLE,
    2
@@ -353,13 +294,13 @@ struct menu decode_menu_data = {
 #define MSG_BUF_SIZE  600           // storing 1st 8 messages, 4x100 + 4x50
 char msg_buf[MSG_BUF_SIZE];         // one big buffer
 
-struct menu qcx_message = {
+struct menu qcx_message_data = {
    {"Xmit Message"},
    { &msg_buf[0], &msg_buf[100], &msg_buf[200], &msg_buf[300], &msg_buf[400], &msg_buf[450],
      &msg_buf[500], &msg_buf[550] },
    { -2, -2, -2, -2, -2, -2, -2, -2 },
    45,                                      // 45 max for text size 2
-   ILI9341_NAVY,
+   ILI9341_DARKGREEN,
    0
 };
 
@@ -373,6 +314,7 @@ int16_t  PhaseIfir[2] = { 32767, 0 };    // swap constants to change phasing
 int16_t  PhaseQfir[2] = { 32767, 0 };
 
 int peak_atn = 15;        // auto attenuation of line_input, atn will be peak_atn - 15
+int manual_atn = 15;      // reduce max signal allowed ( 15 is max signal )
 float agc_gain = 1.0;
 int mux_selected;
 float svalue;
@@ -600,11 +542,10 @@ int current;
    current = mode_menu_data.current;
    selection = touch_decode( t, mode_menu_data.y_size );
    if( mode_menu_data.param[selection] != -1 ){
-      if( selection != 7 ) mode_menu_data.current = selection;  // added phasing to this menu
-      selection = mode_menu_data.param[selection];              // perhaps it should be elsewhere
-                                                                // as is just special case processing here
+      if( selection < 6 ) mode_menu_data.current = selection;   // added phasing to this menu
+      selection = mode_menu_data.param[selection];              // also added attenuator to this menu
 
-      if( selection != 7 ) vfo_mode &= 0x0f;    // save the qcx mode flags, clear the sdr mode flags
+      if( selection < 6 ) vfo_mode &= 0x0f;    // save the qcx mode flags, clear the sdr mode flags
       switch( selection ){
         case 0:     // QCX audio selected
                  vfo_mode |= VFO_CW;
@@ -615,6 +556,7 @@ int current;
                  ModeSelect.gain(1,0.0);
                  //ModeSelect.gain(2,0.0);
                  mux_selected = 3;                        // no connection on 3
+                 decode_menu_data.current = DCW;          // smeter doesn't work so select cw decoder
         break;
 //        case 1:  vfo_mode |= VFO_CW;                       // baseband sdr CW
 //                 digitalWriteFast(QCX_MUTE,HIGH);                 
@@ -661,6 +603,7 @@ int current;
                  //ModeSelect.gain(2,0.0);                  // cw off ( baseband cw )
                  mux_selected = 0;
         break;
+        case 6:  AttenChange();   break;                  // manual attenuation
         case 7:  PhaseChange(1);  break;                  // phasing correction    
       }
      
@@ -691,6 +634,7 @@ int sel;
       BandWidth.setLowpass(1,sel,0.60);       // 0.60
       BandWidth.setLowpass(2,sel,0.90);       // 0.90
       BandWidth.setLowpass(3,sel,2.56);       // 2.56
+      if( mode_menu_data.current == 1 ) BandWidth.setBandpass(3,700,2.2);    !!! fix if else, what Q ?
    }
    
    menu_cleanup();
@@ -703,8 +647,36 @@ int sel;
     if( decode_menu_data.param[sel] != -1 ){
         decode_menu_data.current = decode_menu_data.param[sel];
     }
+
+    if( (decode_menu_data.current != DSMETER && mode_menu_data.current > 1) ||
+         ( mode_menu_data.current == 0 && decode_menu_data.current != DCW ) ){
+      // force cw sdr mode for the decoders if not in that mode or qcx cw mode
+        vfo_mode &= 0x0f;
+        vfo_mode |= VFO_CW;                       // IF SDR CW instead of baseband
+        digitalWriteFast(QCX_MUTE,HIGH);
+        ModeSelect.gain(1,agc_gain);              // SSB audio
+        ModeSelect.gain(0,0.0);                   // AM off
+        //ModeSelect.gain(2,0.0);                   // baseband cw off
+        SSBselect.gain(1,0.0);
+        SSBselect.gain(2,1.0);
+        mux_selected = 1;
+        qsy_mode( mode_menu_data.current, 1 );   
+        mode_menu_data.current = 1;        
+    }
   
   menu_cleanup();
+}
+
+void AttenChange(){
+static int adj = -5;  
+     // rotate through the settings, try dropping 5 at a time
+     manual_atn += adj;
+     if( manual_atn < 0 ){
+        adj = 5;  manual_atn = 5;      // reverse direction
+     }
+     if( manual_atn > 15 ){
+        adj = -5;  manual_atn = 10;
+     }
 }
 
 // I2S audio sometimes starts with I and Q out of order
@@ -1195,11 +1167,17 @@ static int no_chg_cnt;     // slowly raise gain
        no_chg_cnt = 0;
    }
    // raise gain if no strong signals for awhile
-   if( no_chg_cnt > 200 && peak_atn < 15 ){        // 200 == 2 seconds
+   if( no_chg_cnt > 200 && peak_atn < manual_atn ){        // 200 == 2 seconds
        ++peak_atn;
        codec.lineInLevel(peak_atn);
        vfo_mode_disp();
        no_chg_cnt = 0;
+   }
+   if( no_chg_cnt > 200 && peak_atn > manual_atn ){       // gradually reduce to manual atten value
+       --peak_atn;
+       codec.lineInLevel(peak_atn);
+       vfo_mode_disp();
+       no_chg_cnt = 0;       
    }
 }
 
@@ -1498,7 +1476,7 @@ static int pos;
       tft.fillRect( 0, 80 + 3 + 4*32, 32+32 - 6, 32-6, ILI9341_MAROON );
       tft.setCursor( 6, 80 + 6 + 4*32 );
       tft.print("RX");
-      tft.fillRect( 6*32+3, 80 + 4*32+3, 4*32 -6, 32-6 , ILI9341_MAROON);
+      tft.fillRect( 6*32+3, 80 + 4*32+3, 3*32 -6, 32-6 , ILI9341_MAROON);
       tft.setCursor( 6*32 + 6, 80 + 4*32 + 6 );
       tft.print("SPACE");
       return;                // ignore this touch
@@ -1534,10 +1512,17 @@ static int pos;
       tft.setTextColor(EGA[15],0);
       tft.write( c );
       buff[2][pos] = c;
-      tbuf[t_in++] = c;
-      if( c < 'A' && decode_menu_data.current == DHELL ) ++hcount;
-      t_in &= (TBUFSIZE-1);
-      if( decode_menu_data.current != DHELL ) cat.print("KY;");      // cw mode, check if ok to send more data
+      if( c == '$' ){          // message strings
+           menu_display( &qcx_message_data );
+           menu_dispatch = &qcx_message;
+           screen_owner = MENUS;
+      }
+      else{
+         tbuf[t_in++] = c;
+         if( c < 'A' && decode_menu_data.current == DHELL ) ++hcount;
+         t_in &= (TBUFSIZE-1);
+         if( decode_menu_data.current != DHELL ) cat.print("KY;");      // cw mode, check if ok to send more data
+      }
    }
 
    if( c == '*' ){
@@ -1547,6 +1532,30 @@ static int pos;
      //cat.print("TB1;");
    }
 }
+
+void qcx_message( int32_t t ){
+int i,j;
+char c;
+
+   i = touch_decode(t,qcx_message_data.y_size);
+   
+   if( i >= 0 && i < 8 && qcx_message_data.param[i] > 0 ){
+      j = 100 * i;
+      if( i > 4 ) j = j - 50 * ( i - 4 );
+      while( 1 ){
+         c = msg_buf[j++];
+         if( c == 0 ) break;
+         tbuf[t_in++] = c;
+         t_in &= (TBUFSIZE-1);
+         if( c < 'A' && decode_menu_data.current == DHELL ) ++hcount; 
+      }
+   }
+
+   menu_cleanup();
+   menu_dispatch = &key_tx;
+   key_tx(0);
+}
+
 
 int32_t touch(){
 static uint32_t  tm;
@@ -1906,9 +1915,9 @@ char cmd[20];
           for( j = 0; j < 1000; ++j ){
               delay(1);
               radio_control();
-              if( qcx_message.param[i] != -2 ) break;  
+              if( qcx_message_data.param[i] != -2 ) break;  
           }
-          if( qcx_message.param[i] != -2 ) break;
+          if( qcx_message_data.param[i] != -2 ) break;
        }
    }
 }
@@ -1940,7 +1949,7 @@ char c;
   bufin = 100 * i;           // 1st 4 are 100 characters long, rest are 50
   if( i > 4 ) bufin = bufin - 50 * ( i-4);
   msg_buf[bufin++] = ' ';    // preceed with a space for menu printing or appending messages
-  qcx_message.param[i] = ( response[j] == 0 ) ? -1 : 1;    // flag we found it and if it is valid
+  qcx_message_data.param[i] = ( response[j] == 0 ) ? -1 : 1;    // flag we found it and if it is valid
   for(;;++j){
       if( bufin == MSG_BUF_SIZE ){      // out of space, quit and leave string terminated
           msg_buf[MSG_BUF_SIZE-1] = 0;
