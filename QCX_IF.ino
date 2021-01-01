@@ -8,9 +8,9 @@
  *   connected to those nodes for connection of I and Q.  The difference with and without is substantial.
  * 
  * to work on
- *   Replace VFO display with some 7 segment looking fonts.
+ *   time out the hell wait for word spacing
+ *   Message buffers getting erased.  Perhaps need to flash the QCX with latest version before investigating.
  *   Choose a bfo placement on the roofing filter. Maybe use different placement for CW vs SSB.
- *   Find correct Q for the CW Narrow band pass filter.
  *   make a hole in the top case
  *   Add an external cable for usb audio, PC CAT mode.  Low priority for me as this is a standalone SDR.
  *   RTTY, PSK31 decoders - software only.  Low priority as will not be transmitting these modes.
@@ -53,7 +53,9 @@ Change log:
   New Waterfall algorithm for less time used per call. Writes distributed.
   Add Hellschreiber transmit and receive.
   Read out 8 of the 12 QCX transmit buffers via CAT and set up a touch menu to transmit them.
-  Added manual attenuation, also changes the line-in gain on the audio board same as auto-attenuation.    
+  Added manual attenuation, also changes the line-in gain on the audio board same as auto-attenuation.
+  Changed the VFO displays. 
+  Terminal Mode for use with a program like putty.  
  
  *******************************************************************************/
 
@@ -306,7 +308,9 @@ struct menu qcx_message_data = {
 };
 
 
-int ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
+uint8_t ManInTheMiddle;        // act as a USB -> <- QCX serial repeater for CAT commands
+uint8_t TerminalMode;          // Use serial mode as a remote terminal for CW Hell.
+uint8_t Tcount;                // turn on TerminalMode by typing 3 T's in a row.
 
 
 // phase correction FIRs. Apparently sometimes the I2s audio samples are 1 step out of phase
@@ -492,7 +496,7 @@ static struct HELFONT hc;
        else digitalWriteFast( QCX_KEY, LOW );                       /* tx off */
        col <<= 1;
        if( col == ( 1 << 14 )) col= 1,  ++row;
-       if( row > 4 ) col = 1, state = 2;
+       if( row > 4 ) col = 1, state = 2, digitalWriteFast( QCX_KEY,LOW);  // turn off tx just in case if a font error
      break;
    
      case 2:      /* idle a complete column */
@@ -630,12 +634,19 @@ int sel;
    if( band_width_menu_data.param[sel] != -1 ){
       band_width_menu_data.current = sel;
       sel = band_width_menu_data.param[sel];
-     //Serial.println(sel);                    
-      BandWidth.setLowpass(0,sel,0.51);       // 0.51  butterworth constants
-      BandWidth.setLowpass(1,sel,0.60);       // 0.60
-      BandWidth.setLowpass(2,sel,0.90);       // 0.90
-      BandWidth.setLowpass(3,sel,2.56);       // 2.56
-      if( mode_menu_data.current == 1 ) BandWidth.setBandpass(3,700,2.2);   // !!! fix if else, what Q ?
+     //Serial.println(sel); 
+      if( mode_menu_data.current == 1 ){         // cw/hell modes, change last to bandpass response
+         BandWidth.setLowpass(0,sel,0.67); 
+         BandWidth.setLowpass(1,sel,1.10);
+         BandWidth.setLowpass(2,sel,0.707);     
+         BandWidth.setBandpass(3,700,2.5);
+      }
+      else{
+         BandWidth.setLowpass(0,sel,0.51);       // 0.51  butterworth constants
+         BandWidth.setLowpass(1,sel,0.60);       // 0.60
+         BandWidth.setLowpass(2,sel,0.90);       // 0.90
+         BandWidth.setLowpass(3,sel,2.56);       // 2.56
+      }
    }
    
    menu_cleanup();
@@ -789,15 +800,16 @@ int32_t t;
    if( cat.available() ) radio_control();
    if( Serial.available() ){
        char c = Serial.read();
-       if( ManInTheMiddle ) cat.write(c);         // CAT command repeater
-       else if( c == ';' ) ManInTheMiddle = 1;    // looks like a CAT command on USB serial
+       if( ManInTheMiddle ) cat.write(c);                              // CAT command repeater
+       else if( c == ';' && TerminalMode == 0 ) ManInTheMiddle = 1;    // looks like a CAT command on USB serial
+       else if( TerminalMode ) term_send( c );
+       else if( c == 't' || c == 'T' ) ++Tcount;
+       else Tcount = 0;
+       if( TerminalMode == 0 && Tcount > 2 ) TerminalMode = 1, Serial.println("Terminal Mode");
    }
 
    t = touch();
-   if( t ){
-      // goto where menu_dispatch() points
-      (*menu_dispatch)(t);    // off to whoever owns the touchscreen
-   }
+   if( t ) (*menu_dispatch)(t);    // off to whoever owns the touchscreen
 
    USBwaterfall();         // new algorithm for less time, but need 65 calls to complete writes
    LSBwaterfall();
@@ -825,6 +837,22 @@ int32_t t;
    }
    
    // balance_schmoo();    // !!! testing
+}
+
+
+void term_send( char c ){
+
+ // echo or are we using half duplex ?
+ Serial.write(c);
+ if( c < ' ' ) return;
+ c = toupper(c);
+
+ // replicate some code from the touchscreen sending for TerminalMode
+  tbuf[t_in++] = c;
+  if( c < 'A' && decode_menu_data.current == DHELL ) ++hcount;
+  t_in &= (TBUFSIZE-1);
+  if( decode_menu_data.current != DHELL ) cat.print("KY;");      // cw mode, check if ok to send more data
+
 }
 
 
@@ -1032,6 +1060,7 @@ static int wt;    /* heavy weighting will mess up the algorithm, so this compens
 static int singles;
 static int farns,ch_count;
 static int eees;
+static int tcount;
 
    if( cread_indx < 2 ) return;    // need at least one mark and one space in order to decode something
    if( screen_owner != DECODE ) return;
@@ -1087,11 +1116,16 @@ static int eees;
       ++ch_count;
       if( m_ch == 'E' || m_ch == 'I' ) ++eees;         // just noise ?
       else eees = 0;
-      if( eees < 5 ) decode_print(m_ch);
+      if( eees < 5 ){
+         decode_print(m_ch);
+         if( TerminalMode ) Serial.write(m_ch), ++tcount;
+      }
       if( cread_buf[ls] > 3*slicer + farns ){   // check for word space
-        if( ch_count == 1 ) ++farns;    // single characters, no words printed
+        if( ch_count == 1 ) ++farns;            // single characters, no words printed
         ch_count= 0;
         decode_print(' ');
+        if( TerminalMode ) Serial.write(' '), ++tcount;
+        if( tcount > 55 ) tcount = 0, Serial.println();      // this is here so don't split words
       }
    }
      
