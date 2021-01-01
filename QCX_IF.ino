@@ -67,6 +67,7 @@ Change log:
 #include "hilbert_IF.h"
 #include "my_morse.h"           // morse and baudot tables
 #include "helldefs.h"
+#include "led_fonts.h"
 
 #define QCX_MUTE 2              // pin 2 high mutes qcx audio
 #define QCX_KEY  3              // keys PPS via BS170 FET
@@ -451,7 +452,7 @@ int i,j,r,g,b;
 
   message_query();                         // read out the stored messages for local use
 
-  delay(5000);                             // view any bootup messages
+  delay(1000);                             // view any bootup messages
   tft.fillScreen(ILI9341_BLACK);           // clean up the screen again
 
 }
@@ -634,7 +635,7 @@ int sel;
       BandWidth.setLowpass(1,sel,0.60);       // 0.60
       BandWidth.setLowpass(2,sel,0.90);       // 0.90
       BandWidth.setLowpass(3,sel,2.56);       // 2.56
-      if( mode_menu_data.current == 1 ) BandWidth.setBandpass(3,700,2.2);    !!! fix if else, what Q ?
+      if( mode_menu_data.current == 1 ) BandWidth.setBandpass(3,700,2.2);   // !!! fix if else, what Q ?
    }
    
    menu_cleanup();
@@ -1674,185 +1675,6 @@ int test;
 }
 
 
-//  alternate freq display.  Simulate something that looks like the Argonaut V
-/* segments */
-#define A_  1
-#define B_  2
-#define C_  4
-#define D_  8
-#define E_  16
-#define F_  32
-#define G_  64
-#define DP_ 128
-uint8_t segment[16] = {0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f,0x77,0x7c,0x58,0x5e,0x79,0x71};
-
-void vfo_freq_disp(){
-int32_t vfo;
-int32_t digit;
-int i,mult;
-
-   if( screen_owner != DECODE ) return;
-   if( vfo_mode & VFO_B ) vfo = vfo_b;
-   else vfo = vfo_a;
-
-   // qcx reports vfo 700 hz higher than actual as it is a CW receiver
-   // remove that offset for AM, USB, LSB modes.  Add subtract BFO freq.
-   if( (vfo_mode & VFO_AM ) == VFO_AM ) vfo += 12000;   // AM IF is 12.7 
-   else if( ( vfo_mode & VFO_CW ) == 0 ) vfo -= 700;    // not CW, remove offset.
-   if( (vfo_mode & VFO_USB ) ) vfo -= BFO_FREQ;
-   if( (vfo_mode & VFO_LSB ) ) vfo += BFO_FREQ;
-   if( (vfo_mode & VFO_CW ) &&  mode_menu_data.current == 1) vfo -= BFO_FREQ;   // SDR CW mode
-   
-   // 40 meter radio, ignore 10 meg digit for now
-   mult = 1000000;
-   for( i = 0; i < 7; ++i ){
-       digit = vfo / mult;
-       disp_segments(i,digit);
-       vfo -= digit*mult;
-       mult /= 10;
-   }  
-
-   tft.setTextSize(2);
-   tft.setTextColor(EGA[10],0);
-   int val = rit;
-   if( val < 0 ){
-      val = - val;
-      tft.setTextColor(EGA[12],0);       // change color instead of displaying the minus sign
-   }
-   tft.setCursor(265,20);
-   p_leading(val,4);
-}
-
-void disp_segments( int pos, int32_t digit ){    // ?? maybe a font table would be better
-uint16_t color;
-
-   digit = segment[digit];
-   color = ( digit & A_ ) ? EGA[10] : GRAY[1] ;
-   draw_A( pos,color );
-   color = ( digit & B_ ) ? EGA[10] : GRAY[1] ;
-   draw_B( pos,color );
-   color = ( digit & C_ ) ? EGA[10] : GRAY[1] ;
-   draw_C( pos,color );
-   color = ( digit & D_ ) ? EGA[10] : GRAY[1] ;
-   draw_D( pos,color );
-   color = ( digit & E_ ) ? EGA[10] : GRAY[1] ;
-   draw_E( pos,color );
-   color = ( digit & F_ ) ? EGA[10] : GRAY[1] ;
-   draw_F( pos,color );
-   color = ( digit & G_ ) ? EGA[10] : GRAY[1] ;
-   draw_G( pos,color );
-   color = ( pos == 0 || pos == 3 ) ? EGA[10] : GRAY[1] ;
-   draw_DP( pos, color);
-  
-}
-
-#define VB 20     //20
-#define VS 35     //40
-#define HB 20     //20
-#define HS 32     //30
-
- // slanted verticals have strange looking jaggies, try all horizontal lines
-void draw_A( int pos, uint16_t color ){
-int zz;
-int i;
-
-   zz = HB + HS * pos;
-   for( i = 0; i < 4; ++i ) tft.drawFastHLine( zz+12,VB+i,13,color);
-}
-
-void draw_G( int pos, uint16_t color ){
-int zz;
-int i,k;
-  
-   zz = HB + HS * pos;
-   for( i = 0; i < 4; ++i ){
-      k = ( i == 1 || i == 2 ) ? 2 : 0;
-      tft.drawFastHLine( zz+9-k,VB+VS/2+i-2,13 + 2*k,color);
-   }
-}
-
-void draw_D( int pos, uint16_t color ){
-int zz;
-int i;
-  
-   zz = HB + HS * pos;
-   for( i = 0; i < 4; ++i ) tft.drawFastHLine( zz+6,VB+VS-i,13,color);
-}
-
-void draw_B( int pos, uint16_t color ){
-int zz;
-int i,len;
-
-   zz = HB + HS * pos +27;
-   len = 1;
-   for( i = 0; i < VS/2; ++i ){
-      tft.drawFastHLine( zz,VB+i,len,color);
-      if( i < 4 && len < 4 ) ++len;
-      if( i > VS/2 - 4 ) ++zz, --len;
-      if( i == VS/8 ) --zz;
-      if( i == VS/4 ) --zz;
-      if( i == 3*VS/8 ) --zz;
-   }
-}
-
-void draw_C( int pos, uint16_t color ){
-int zz;
-int i,len;
-  
-   zz = HB + HS * pos + 27;
-   len = 1;
-   for( i = 0; i < VS/2; ++i ){
-      tft.drawFastHLine( zz,VB+VS/2+i,len,color);
-      if( i < 4 && len < 4 ) ++len, --zz;
-      if( i > VS/2 - 4 ) --len;
-      if( i == VS/8 ) --zz;
-      if( i == VS/4 ) --zz;
-      if( i == 3*VS/8 ) --zz;      
-   } 
-}
-
-void draw_E( int pos, uint16_t color ){
-int zz;
-int i,len;
-
-   zz = HB + HS * pos + 4;
-
-   len = 1;
-   for( i = 0; i < VS/2; ++i ){
-      tft.drawFastHLine( zz,VB+VS/2+i,len,color);
-      if( i < 4 && len < 4 ) ++len;
-      if( i > VS/2 - 4 ) --len, ++zz;
-      if( i == VS/8 ) --zz;
-      if( i == VS/4 ) --zz;
-      if( i == 3*VS/8 ) --zz;      
-   } 
-}
-
-void draw_F( int pos, uint16_t color ){
-int zz;
-int i,len;
-
-   zz = HB + HS * pos + 10;
-
-   len = 1;
-   for( i = 0; i < VS/2; ++i ){
-      tft.drawFastHLine( zz,VB+i,len,color);
-      if( i < 4 && len < 4 ) ++len, --zz;
-      if( i > VS/2 - 4 ) --len, ++zz;
-      if( i == VS/8 ) --zz;
-      if( i == VS/4 ) --zz;
-      if( i == 3*VS/8 ) --zz;      
-   } 
-}
-
-
-void draw_DP( int pos, uint16_t color ){
-int zz;
-
-   zz = HB + HS * pos;
-   tft.fillRect(zz+HS-5, VB+VS-1, 3, 3, color);
-}
-
 
 #define CMDLEN 128
 char response[CMDLEN];
@@ -2181,6 +2003,120 @@ static int old_rit;
 }
 
 
+void vfo_freq_disp(){
+int val;
+int32_t vfo;
+//int pos;           // sceen x position
+//int32_t mult;
+int ca,cb;         // colors
+
+   ca = cb = 4;    // unused vfo color in EGA pallet
+   if( screen_owner != DECODE ) return;
+   if( vfo_mode & VFO_B ) vfo = vfo_b, cb = 10;
+   else vfo = vfo_a, ca = 10;
+
+   if( vfo_mode & VFO_SPLIT ) cb = 12;    // vfo b is active transmit
+
+   // qcx reports vfo 700 hz higher than actual as it is a CW receiver
+   // remove that offset for AM, USB, LSB modes.  Add subtract BFO freq.
+   if( (vfo_mode & VFO_AM ) == VFO_AM ) vfo += 12000;   // AM IF is 12.7 
+   else if( ( vfo_mode & VFO_CW ) == 0 ) vfo -= 700;    // not CW, remove offset.
+   if( (vfo_mode & VFO_USB ) ) vfo -= BFO_FREQ;
+   if( (vfo_mode & VFO_LSB ) ) vfo += BFO_FREQ;
+   if( (vfo_mode & VFO_CW ) &&  mode_menu_data.current == 1) vfo -= BFO_FREQ;   // SDR CW mode
+
+
+   if( ca == 10 ) disp_vfo( vfo, 5, ca );
+   else disp_vfo(vfo_a,5,ca);
+   if( cb == 10 ) disp_vfo(vfo,130,cb);
+   else disp_vfo(vfo_b,130,cb);
+   
+
+   
+//   tft.setTextSize(3);
+//   tft.setCursor(50,20);
+//   tft.setTextColor(EGA[10],0);
+//   if( vfo < 10000000 ) tft.write(' ');
+//   tft.print(vfo / 1000);
+  // tft.write('.');
+//   tft.setTextSize(2);
+//   p_leading(vfo % 1000,3);
+
+  // tft.setFontAdafruit();   // !!!
+   tft.setTextSize(2);
+   val = rit;
+   if( val < 0 ){
+      val = - val;
+      tft.setTextColor(EGA[12],0);       // change color instead of displaying the minus sign
+   }
+   tft.setCursor(265,20);
+   p_leading(val,4);
+
+
+
+}
+
+void disp_vfo( int32_t vfo, int pos, int col ){
+
+
+   int leading = 1; uint8_t c;
+   int32_t mult = 10000000L;
+   for( int i = 0; i < 8; ++i ){
+       int digit = vfo / mult;
+       if( leading && digit == 0 ) c = '/';
+       else leading = 0, c = digit + '0';
+       if( mult > 100 ) pos += disp_segments(pos,c,col,BigNumbers);
+       else pos += disp_segments(pos,c,col,MediumNumbers);
+       vfo -= digit*mult;
+       mult /= 10;
+       pos+= 2;                // wider spacing
+   }  
+  
+}
+
+
+// change a mono font to 4BPP for display.  bits need to change from a vertical 0-7 to horizontal format.
+// only using two colors so each 4 bits will be 0 or the forground color
+// displaying at a fixed row for now, but should probably pass that as an argument also
+// pass color also would be good
+int disp_segments( int pos, uint8_t digit, int color, const uint8_t font[] ){
+int i,j,k,w,h,base,sz,adr;
+uint8_t chr[1350];
+uint8_t data;
+
+   for( i = 0; i < 1350; ++i ) chr[i] = 0;
+   w = font[0];  h = font[1]; base = font[2]; sz = font[3];
+   digit = digit - base;                    // get index into table
+   if( digit < 0 || digit > sz ) return 0;    // outside of the table.
+   
+   // reuse base as our zero index in the table
+   base = digit * (w * h / 8 ) + 4 ;
+
+   for( k = 0; k < h/8; ++k ){          // each height
+      for( i = 0; i < w; ++i ){         // row of width
+        data = font[base+i];
+        for( j = 0; j < 8; j++ ){       // each bit
+ //         adr = k * (w * h / 4) + i/2 + j * w/2;          // h/16   j*w/2  h/4 works for medium, h/8 works for large
+            adr = k * 4 * w + i/2 + j * w/2;                // k * 8*w/2 where 8 is the range of j, 2 pixel/byte
+          if( adr >= 1350 ) adr = 1349; // something wrong     
+          if( i & 1 ){                  // lower nibble
+             if( data & 1 ) chr[adr] |= color;
+          }
+          else{                         //  upper nibble
+             if( data & 1) chr[adr] |=  ( color << 4 );
+          }
+          data >>= 1;                   // next bit
+        }
+      }
+      base += w;
+   }
+
+// void writeRect4BPP(int16_t x, int16_t y, int16_t w, int16_t h, const uint8_t *pixels, const uint16_t * palette );
+   tft.writeRect4BPP( pos, 25, w, h, chr, EGA );
+
+   return w;
+}
+
 
 void balance_schmoo(){    //  setup function.  Find the least signal on USB
 
@@ -2454,38 +2390,6 @@ static int loc;
 
 
 /***************************** old code
-  void vfo_freq_disp(){
-int val;
-int32_t VFO;
-
-   VFO = vfo_a + tuning_offset - 700;
-
-   vfo_freq_disp_alt(); // !!! testing
-   return;
-   
-   tft.setTextSize(2);
-   tft.setCursor(5,20);
-   tft.setTextColor(EGA[10],0);
-   if( VFO < 10000000 ) tft.write(' ');
-   tft.print(VFO / 1000);
-   tft.write('.');
-   p_leading(VFO % 1000,3);
-   
-   tft.setCursor(135,20);
-   if( vfo_b < 10000000 ) tft.write(' ');
-   tft.print(vfo_b / 1000);
-   tft.write('.');
-   p_leading(vfo_b % 1000,3 );
-
-   val = rit;
-   if( val < 0 ){
-      val = - val;
-      tft.setTextColor(EGA[12],0);       // change color instead of displaying the minus sign
-   }
-   tft.setCursor(265,20);
-   p_leading(val,4);
-
-}
 
 70
 
@@ -2807,5 +2711,186 @@ int32_t VFO;
 (short)( 32768 * 0.000021313539094513  ),
 (short)( 32768 * 8.596907941615600E-6  ),
 (short)( 32768 * 1.936360238116770E-6  )
+
+
+//  alternate freq display.  Simulate something that looks like the Argonaut V
+
+#define A_  1
+#define B_  2
+#define C_  4
+#define D_  8
+#define E_  16
+#define F_  32
+#define G_  64
+#define DP_ 128
+uint8_t segment[16] = {0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f,0x77,0x7c,0x58,0x5e,0x79,0x71};
+
+void vfo_freq_disp(){
+int32_t vfo;
+int32_t digit;
+int i,mult;
+
+   if( screen_owner != DECODE ) return;
+   if( vfo_mode & VFO_B ) vfo = vfo_b;
+   else vfo = vfo_a;
+
+   // qcx reports vfo 700 hz higher than actual as it is a CW receiver
+   // remove that offset for AM, USB, LSB modes.  Add subtract BFO freq.
+   if( (vfo_mode & VFO_AM ) == VFO_AM ) vfo += 12000;   // AM IF is 12.7 
+   else if( ( vfo_mode & VFO_CW ) == 0 ) vfo -= 700;    // not CW, remove offset.
+   if( (vfo_mode & VFO_USB ) ) vfo -= BFO_FREQ;
+   if( (vfo_mode & VFO_LSB ) ) vfo += BFO_FREQ;
+   if( (vfo_mode & VFO_CW ) &&  mode_menu_data.current == 1) vfo -= BFO_FREQ;   // SDR CW mode
+   
+   // 40 meter radio, ignore 10 meg digit for now
+   mult = 1000000;
+   for( i = 0; i < 7; ++i ){
+       digit = vfo / mult;
+       disp_segments(i,digit);
+       vfo -= digit*mult;
+       mult /= 10;
+   }  
+
+   tft.setTextSize(2);
+   tft.setTextColor(EGA[10],0);
+   int val = rit;
+   if( val < 0 ){
+      val = - val;
+      tft.setTextColor(EGA[12],0);       // change color instead of displaying the minus sign
+   }
+   tft.setCursor(265,20);
+   p_leading(val,4);
+}
+
+void disp_segments( int pos, int32_t digit ){    // ?? maybe a font table would be better
+uint16_t color;
+
+   digit = segment[digit];
+   color = ( digit & A_ ) ? EGA[10] : GRAY[1] ;
+   draw_A( pos,color );
+   color = ( digit & B_ ) ? EGA[10] : GRAY[1] ;
+   draw_B( pos,color );
+   color = ( digit & C_ ) ? EGA[10] : GRAY[1] ;
+   draw_C( pos,color );
+   color = ( digit & D_ ) ? EGA[10] : GRAY[1] ;
+   draw_D( pos,color );
+   color = ( digit & E_ ) ? EGA[10] : GRAY[1] ;
+   draw_E( pos,color );
+   color = ( digit & F_ ) ? EGA[10] : GRAY[1] ;
+   draw_F( pos,color );
+   color = ( digit & G_ ) ? EGA[10] : GRAY[1] ;
+   draw_G( pos,color );
+   color = ( pos == 0 || pos == 3 ) ? EGA[10] : GRAY[1] ;
+   draw_DP( pos, color);
+  
+}
+
+#define VB 20     //20
+#define VS 24     //35 !!! testing
+#define HB 20     //20
+#define HS 32     //32 !!! 
+
+ // slanted verticals have strange looking jaggies, try all horizontal lines
+void draw_A( int pos, uint16_t color ){
+int zz;
+int i;
+
+   zz = HB + HS * pos;
+   for( i = 0; i < 4; ++i ) tft.drawFastHLine( zz+12,VB+i,13,color);
+}
+
+void draw_G( int pos, uint16_t color ){
+int zz;
+int i,k;
+  
+   zz = HB + HS * pos;
+   for( i = 0; i < 4; ++i ){
+      k = ( i == 1 || i == 2 ) ? 2 : 0;
+      tft.drawFastHLine( zz+9-k,VB+VS/2+i-2,13 + 2*k,color);
+   }
+}
+
+void draw_D( int pos, uint16_t color ){
+int zz;
+int i;
+  
+   zz = HB + HS * pos;
+   for( i = 0; i < 4; ++i ) tft.drawFastHLine( zz+6,VB+VS-i,13,color);
+}
+
+void draw_B( int pos, uint16_t color ){
+int zz;
+int i,len;
+
+   zz = HB + HS * pos +27;
+   len = 1;
+   for( i = 0; i < VS/2; ++i ){
+      tft.drawFastHLine( zz,VB+i,len,color);
+      if( i < 4 && len < 4 ) ++len;
+      if( i > VS/2 - 4 ) ++zz, --len;
+      if( i == VS/8 ) --zz;
+      if( i == VS/4 ) --zz;
+      if( i == 3*VS/8 ) --zz;
+   }
+}
+
+void draw_C( int pos, uint16_t color ){
+int zz;
+int i,len;
+  
+   zz = HB + HS * pos + 27;
+   len = 1;
+   for( i = 0; i < VS/2; ++i ){
+      tft.drawFastHLine( zz,VB+VS/2+i,len,color);
+      if( i < 4 && len < 4 ) ++len, --zz;
+      if( i > VS/2 - 4 ) --len;
+      if( i == VS/8 ) --zz;
+      if( i == VS/4 ) --zz;
+      if( i == 3*VS/8 ) --zz;      
+   } 
+}
+
+void draw_E( int pos, uint16_t color ){
+int zz;
+int i,len;
+
+   zz = HB + HS * pos + 4;
+
+   len = 1;
+   for( i = 0; i < VS/2; ++i ){
+      tft.drawFastHLine( zz,VB+VS/2+i,len,color);
+      if( i < 4 && len < 4 ) ++len;
+      if( i > VS/2 - 4 ) --len, ++zz;
+      if( i == VS/8 ) --zz;
+      if( i == VS/4 ) --zz;
+      if( i == 3*VS/8 ) --zz;      
+   } 
+}
+
+void draw_F( int pos, uint16_t color ){
+int zz;
+int i,len;
+
+   zz = HB + HS * pos + 10;
+
+   len = 1;
+   for( i = 0; i < VS/2; ++i ){
+      tft.drawFastHLine( zz,VB+i,len,color);
+      if( i < 4 && len < 4 ) ++len, --zz;
+      if( i > VS/2 - 4 ) --len, ++zz;
+      if( i == VS/8 ) --zz;
+      if( i == VS/4 ) --zz;
+      if( i == 3*VS/8 ) --zz;      
+   } 
+}
+
+
+void draw_DP( int pos, uint16_t color ){
+int zz;
+
+   zz = HB + HS * pos;
+   tft.fillRect(zz+HS-5, VB+VS-1, 3, 3, color);
+}
+
 
  */
